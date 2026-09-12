@@ -316,7 +316,12 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 body {
     font-family: Arial, sans-serif;
 
-    background: #f5f7fb;
+    background: 
+        linear-gradient(
+                    rgba(0, 0, 0, 0.35),
+                    rgba(0, 0, 0, 0.35)
+                ),
+                url("assets/images/caloocan-bg.png") center center / cover no-repeat fixed;
 
     min-height: 100vh;
 

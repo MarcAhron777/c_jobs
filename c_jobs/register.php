@@ -190,7 +190,12 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 Helvetica,
                 sans-serif;
 
-            background: #f1f5f9;
+            background:
+                linear-gradient(
+                    rgba(0, 0, 0, 0.35),
+                    rgba(0, 0, 0, 0.35)
+                ),
+                url("assets/images/caloocan-bg.png") center center / cover no-repeat fixed;
 
             min-height: 100vh;
 
