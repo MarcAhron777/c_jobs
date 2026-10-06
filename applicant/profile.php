@@ -22,12 +22,380 @@ if (
 }
 
 
-$userId =
-    $_SESSION["user_id"];
-
+$userId = (int) $_SESSION["user_id"];
 
 $success = "";
 $error = "";
+
+
+/*
+|--------------------------------------------------------------------------
+| GEOCODE ADDRESS
+|--------------------------------------------------------------------------
+|
+| Converts the applicant's typed address into latitude + longitude
+| using OpenStreetMap Nominatim.
+|
+| Latitude and Longitude are NOT shown to the applicant.
+|
+*/
+
+function geocodeAddress(string $address): ?array
+{
+    $address = trim($address);
+
+    if ($address === "") {
+        return null;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Improve Search Accuracy
+    |--------------------------------------------------------------------------
+    */
+
+    $searchAddress = $address;
+
+
+    if (
+        stripos(
+            $searchAddress,
+            "Caloocan"
+        ) === false
+    ) {
+
+        $searchAddress .=
+            ", Caloocan City";
+    }
+
+
+    if (
+        stripos(
+            $searchAddress,
+            "Philippines"
+        ) === false
+    ) {
+
+        $searchAddress .=
+            ", Philippines";
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | MAKE SURE CURL EXISTS
+    |--------------------------------------------------------------------------
+    */
+
+    if (!function_exists("curl_init")) {
+
+        throw new Exception(
+            "PHP cURL is not enabled. Please enable the cURL extension in XAMPP."
+        );
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | OPENSTREETMAP NOMINATIM
+    |--------------------------------------------------------------------------
+    */
+
+    $query = http_build_query([
+        "q" => $searchAddress,
+        "format" => "jsonv2",
+        "limit" => 1,
+        "countrycodes" => "ph",
+        "addressdetails" => 1
+    ]);
+
+
+    $url =
+        "https://nominatim.openstreetmap.org/search?"
+        . $query;
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | CURL REQUEST
+    |--------------------------------------------------------------------------
+    */
+
+    $ch = curl_init();
+
+
+    curl_setopt_array(
+        $ch,
+        [
+
+            CURLOPT_URL =>
+                $url,
+
+            CURLOPT_RETURNTRANSFER =>
+                true,
+
+            CURLOPT_FOLLOWLOCATION =>
+                true,
+
+            CURLOPT_CONNECTTIMEOUT =>
+                10,
+
+            CURLOPT_TIMEOUT =>
+                15,
+
+            CURLOPT_HTTPHEADER => [
+
+                "Accept: application/json",
+
+                "User-Agent: CaloocanJobsPortal/1.0"
+
+            ]
+
+        ]
+    );
+
+
+    $response =
+        curl_exec(
+            $ch
+        );
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | CURL ERROR
+    |--------------------------------------------------------------------------
+    */
+
+    if ($response === false) {
+
+        $curlError =
+            curl_error(
+                $ch
+            );
+
+
+        curl_close(
+            $ch
+        );
+
+
+        error_log(
+            "Geocoding CURL Error: "
+            . $curlError
+        );
+
+
+        throw new Exception(
+            "Unable to connect to the address location service. Please try again."
+        );
+    }
+
+
+    $httpCode =
+        (int)
+        curl_getinfo(
+            $ch,
+            CURLINFO_HTTP_CODE
+        );
+
+
+    curl_close(
+        $ch
+    );
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | HTTP ERROR
+    |--------------------------------------------------------------------------
+    */
+
+    if ($httpCode !== 200) {
+
+        error_log(
+            "Geocoding HTTP Code: "
+            . $httpCode
+        );
+
+
+        throw new Exception(
+            "Unable to verify the address right now. Please try again."
+        );
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | DECODE RESPONSE
+    |--------------------------------------------------------------------------
+    */
+
+    $results =
+        json_decode(
+            $response,
+            true
+        );
+
+
+    if (
+        !is_array($results)
+        ||
+        empty($results)
+    ) {
+
+        return null;
+    }
+
+
+    $result =
+        $results[0];
+
+
+    if (
+        !isset(
+            $result["lat"],
+            $result["lon"]
+        )
+    ) {
+
+        return null;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | VERIFY THAT RESULT IS IN CALOOCAN
+    |--------------------------------------------------------------------------
+    */
+
+    $displayName =
+        $result["display_name"]
+        ?? "";
+
+
+    if (
+        stripos(
+            $displayName,
+            "Caloocan"
+        ) === false
+    ) {
+
+        return null;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | VALIDATE COORDINATES
+    |--------------------------------------------------------------------------
+    */
+
+    $latitude =
+        (float)
+        $result["lat"];
+
+
+    $longitude =
+        (float)
+        $result["lon"];
+
+
+    if (
+        $latitude < -90
+        ||
+        $latitude > 90
+    ) {
+
+        return null;
+    }
+
+
+    if (
+        $longitude < -180
+        ||
+        $longitude > 180
+    ) {
+
+        return null;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | RETURN LOCATION
+    |--------------------------------------------------------------------------
+    */
+
+    return [
+
+        "latitude" =>
+            $latitude,
+
+        "longitude" =>
+            $longitude,
+
+        "display_name" =>
+            $displayName
+
+    ];
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| GET CURRENT PROFILE
+|--------------------------------------------------------------------------
+|
+| We get the current record BEFORE POST so we can keep the saved coordinates
+| when the applicant changes something other than the address.
+|
+*/
+
+$stmt =
+    $pdo->prepare("
+
+        SELECT
+
+            id,
+            first_name,
+            last_name,
+            phone,
+            religion,
+            education,
+            address,
+            latitude,
+            longitude,
+            bio,
+            profile_picture
+
+        FROM applicants
+
+        WHERE user_id = ?
+
+        LIMIT 1
+
+    ");
+
+
+$stmt->execute([
+    $userId
+]);
+
+
+$applicant =
+    $stmt->fetch(
+        PDO::FETCH_ASSOC
+    );
+
+
+if (!$applicant) {
+
+    die(
+        "Applicant profile not found."
+    );
+}
 
 
 /*
@@ -37,8 +405,16 @@ $error = "";
 */
 
 if (
-    $_SERVER["REQUEST_METHOD"] === "POST"
+    $_SERVER["REQUEST_METHOD"]
+    === "POST"
 ) {
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | INPUTS
+    |--------------------------------------------------------------------------
+    */
 
     $firstName =
         trim(
@@ -91,26 +467,6 @@ if (
 
     /*
     |--------------------------------------------------------------------------
-    | LOCATION
-    |--------------------------------------------------------------------------
-    */
-
-    $latitude =
-        trim(
-            $_POST["latitude"]
-            ?? ""
-        );
-
-
-    $longitude =
-        trim(
-            $_POST["longitude"]
-            ?? ""
-        );
-
-
-    /*
-    |--------------------------------------------------------------------------
     | VALIDATION
     |--------------------------------------------------------------------------
     */
@@ -124,75 +480,134 @@ if (
         $error =
             "First name and last name are required.";
 
+    } elseif (
+        $address === ""
+    ) {
+
+        $error =
+            "Please enter your current address.";
+
     } else {
+
 
         try {
 
 
             /*
             |--------------------------------------------------------------------------
-            | CONVERT EMPTY LOCATION TO NULL
+            | DEFAULT CURRENT COORDINATES
             |--------------------------------------------------------------------------
+            |
+            | If applicant did not change the address,
+            | we don't need to geocode it again.
+            |
             */
 
             $latitudeValue =
-                is_numeric($latitude)
-                ? (float) $latitude
-                : null;
+                $applicant["latitude"]
+                !== null
+                ?
+                (float)
+                $applicant["latitude"]
+                :
+                null;
 
 
             $longitudeValue =
-                is_numeric($longitude)
-                ? (float) $longitude
-                : null;
+                $applicant["longitude"]
+                !== null
+                ?
+                (float)
+                $applicant["longitude"]
+                :
+                null;
 
 
             /*
             |--------------------------------------------------------------------------
-            | VALIDATE COORDINATE RANGE
+            | CHECK IF ADDRESS CHANGED
+            |--------------------------------------------------------------------------
+            */
+
+            $oldAddress =
+                trim(
+                    $applicant["address"]
+                    ?? ""
+                );
+
+
+            $addressChanged =
+                strcasecmp(
+                    $oldAddress,
+                    $address
+                ) !== 0;
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | GEOCODE WHEN:
+            |
+            | 1. Address changed
+            | OR
+            | 2. No coordinates have been saved yet
             |--------------------------------------------------------------------------
             */
 
             if (
-                $latitudeValue !== null
-                &&
-                (
-                    $latitudeValue < -90
-                    ||
-                    $latitudeValue > 90
-                )
+                $addressChanged
+                ||
+                $latitudeValue === null
+                ||
+                $longitudeValue === null
             ) {
 
-                throw new Exception(
-                    "Invalid latitude."
-                );
-            }
+
+                $coordinates =
+                    geocodeAddress(
+                        $address
+                    );
 
 
-            if (
-                $longitudeValue !== null
-                &&
-                (
-                    $longitudeValue < -180
-                    ||
-                    $longitudeValue > 180
-                )
-            ) {
+                /*
+                |--------------------------------------------------------------------------
+                | ADDRESS NOT FOUND
+                |--------------------------------------------------------------------------
+                */
 
-                throw new Exception(
-                    "Invalid longitude."
-                );
+                if (!$coordinates) {
+
+                    throw new Exception(
+
+                        "We could not locate that address in Caloocan City. "
+                        . "Please enter a more complete address, including "
+                        . "street, subdivision or area, barangay, and Caloocan City."
+
+                    );
+                }
+
+
+                $latitudeValue =
+                    $coordinates[
+                        "latitude"
+                    ];
+
+
+                $longitudeValue =
+                    $coordinates[
+                        "longitude"
+                    ];
             }
 
 
             /*
             |--------------------------------------------------------------------------
-            | UPDATE
+            | UPDATE PROFILE
             |--------------------------------------------------------------------------
             */
 
             $stmt =
                 $pdo->prepare("
+
                     UPDATE applicants
 
                     SET
@@ -216,6 +631,7 @@ if (
                         bio = ?
 
                     WHERE user_id = ?
+
                 ");
 
 
@@ -229,9 +645,7 @@ if (
                     ? $phone
                     : null,
 
-                $address !== ""
-                    ? $address
-                    : null,
+                $address,
 
                 $latitudeValue,
 
@@ -254,86 +668,86 @@ if (
             ]);
 
 
+            /*
+            |--------------------------------------------------------------------------
+            | SUCCESS
+            |--------------------------------------------------------------------------
+            */
+
             $success =
                 "Profile updated successfully.";
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | REFRESH APPLICANT DATA
+            |--------------------------------------------------------------------------
+            */
+
+            $stmt =
+                $pdo->prepare("
+
+                    SELECT
+
+                        id,
+                        first_name,
+                        last_name,
+                        phone,
+                        religion,
+                        education,
+                        address,
+                        latitude,
+                        longitude,
+                        bio,
+                        profile_picture
+
+                    FROM applicants
+
+                    WHERE user_id = ?
+
+                    LIMIT 1
+
+                ");
+
+
+            $stmt->execute([
+                $userId
+            ]);
+
+
+            $applicant =
+                $stmt->fetch(
+                    PDO::FETCH_ASSOC
+                );
 
 
         } catch (
             PDOException $e
         ) {
 
+
+            error_log(
+                $e->getMessage()
+            );
+
+
             $error =
-                "Failed to update profile.";
+                "Failed to update profile. Please try again.";
+
 
         } catch (
             Exception $e
         ) {
 
+
             $error =
                 $e->getMessage();
+
         }
     }
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| GET PROFILE
-|--------------------------------------------------------------------------
-*/
-
-$stmt =
-    $pdo->prepare("
-        SELECT
-
-            first_name,
-
-            last_name,
-
-            phone,
-
-            religion,
-
-            education,
-
-            address,
-
-            latitude,
-
-            longitude,
-
-            bio,
-
-            profile_picture
-
-        FROM applicants
-
-        WHERE user_id = ?
-
-        LIMIT 1
-    ");
-
-
-$stmt->execute([
-    $userId
-]);
-
-
-$applicant =
-    $stmt->fetch(
-        PDO::FETCH_ASSOC
-    );
-
-
-if (!$applicant) {
-
-    die(
-        "Applicant profile not found."
-    );
-}
-
 ?>
-
 
 <!DOCTYPE html>
 
@@ -378,6 +792,7 @@ body {
 
     font-family:
         Arial,
+        Helvetica,
         sans-serif;
 
     background:
@@ -397,10 +812,10 @@ body {
 .navbar {
 
     background:
-        white;
+        #ffffff;
 
     border-bottom:
-        1px solid #ddd;
+        1px solid #e5e7eb;
 
     padding:
         16px 40px;
@@ -436,6 +851,9 @@ body {
 
     gap:
         20px;
+
+    align-items:
+        center;
 }
 
 
@@ -446,6 +864,9 @@ body {
 
     color:
         #333;
+
+    font-size:
+        14px;
 }
 
 
@@ -453,6 +874,13 @@ body {
 
     color:
         #2563eb;
+}
+
+
+.logout {
+
+    color:
+        #dc2626 !important;
 }
 
 
@@ -465,306 +893,13 @@ body {
 .container {
 
     max-width:
-        800px;
+        980px;
 
     margin:
         40px auto;
 
     padding:
-        0 20px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| CARD
-|--------------------------------------------------------------------------
-*/
-
-.card {
-
-    background:
-        white;
-
-    padding:
-        30px;
-
-    border-radius:
-        10px;
-
-    box-shadow:
-        0 2px 10px
-        rgba(
-            0,
-            0,
-            0,
-            0.05
-        );
-}
-
-
-h1 {
-
-    margin-bottom:
-        10px;
-}
-
-
-.subtitle {
-
-    color:
-        #666;
-
-    margin-bottom:
-        25px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| MESSAGE
-|--------------------------------------------------------------------------
-*/
-
-.message {
-
-    padding:
-        12px;
-
-    border-radius:
-        6px;
-
-    margin-bottom:
-        20px;
-}
-
-
-.success {
-
-    background:
-        #dcfce7;
-
-    color:
-        #166534;
-}
-
-
-.error {
-
-    background:
-        #fee2e2;
-
-    color:
-        #991b1b;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| FORM
-|--------------------------------------------------------------------------
-*/
-
-.form-group {
-
-    margin-bottom:
-        18px;
-}
-
-
-label {
-
-    display:
-        block;
-
-    margin-bottom:
-        7px;
-
-    font-weight:
-        bold;
-}
-
-
-input,
-textarea {
-
-    width:
-        100%;
-
-    padding:
-        12px;
-
-    border:
-        1px solid #ccc;
-
-    border-radius:
-        6px;
-
-    font-size:
-        15px;
-}
-
-
-input:focus,
-textarea:focus {
-
-    outline:
-        none;
-
-    border-color:
-        #2563eb;
-}
-
-
-textarea {
-
-    min-height:
-        120px;
-
-    resize:
-        vertical;
-}
-
-
-.row {
-
-    display:
-        grid;
-
-    grid-template-columns:
-        1fr 1fr;
-
-    gap:
-        15px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| LOCATION
-|--------------------------------------------------------------------------
-*/
-
-.location-card {
-
-    background:
-        #eff6ff;
-
-    border:
-        1px solid #bfdbfe;
-
-    padding:
-        18px;
-
-    border-radius:
-        8px;
-
-    margin-bottom:
-        20px;
-}
-
-
-.location-card h3 {
-
-    margin-bottom:
-        7px;
-
-    color:
-        #1e40af;
-}
-
-
-.location-card p {
-
-    color:
-        #475569;
-
-    font-size:
-        14px;
-
-    line-height:
-        1.5;
-
-    margin-bottom:
-        15px;
-}
-
-
-.location-btn {
-
-    background:
-        #16a34a;
-
-    margin-bottom:
-        15px;
-}
-
-
-.location-btn:hover {
-
-    background:
-        #15803d;
-}
-
-
-.location-status {
-
-    margin-top:
-        10px;
-
-    font-size:
-        14px;
-
-    color:
-        #166534;
-
-    font-weight:
-        bold;
-}
-
-
-.readonly-input {
-
-    background:
-        #f8fafc;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| BUTTON
-|--------------------------------------------------------------------------
-*/
-
-button {
-
-    padding:
-        12px 20px;
-
-    background:
-        #2563eb;
-
-    color:
-        white;
-
-    border:
-        none;
-
-    border-radius:
-        6px;
-
-    cursor:
-        pointer;
-
-    font-size:
-        15px;
-}
-
-
-button:hover {
-
-    background:
-        #1d4ed8;
+        0 20px 50px;
 }
 
 
@@ -787,6 +922,349 @@ button:hover {
 
     color:
         #2563eb;
+
+    font-size:
+        14px;
+
+    font-weight:
+        600;
+}
+
+
+.back:hover {
+
+    text-decoration:
+        underline;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| CARD
+|--------------------------------------------------------------------------
+*/
+
+.card {
+
+    background:
+        #ffffff;
+
+    padding:
+        36px;
+
+    border-radius:
+        14px;
+
+    border:
+        1px solid #e5e7eb;
+
+    box-shadow:
+        0 3px 15px
+        rgba(
+            0,
+            0,
+            0,
+            0.05
+        );
+}
+
+
+h1 {
+
+    font-size:
+        32px;
+
+    margin-bottom:
+        8px;
+
+    color:
+        #1f2937;
+}
+
+
+.subtitle {
+
+    color:
+        #64748b;
+
+    margin-bottom:
+        30px;
+
+    line-height:
+        1.5;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| MESSAGE
+|--------------------------------------------------------------------------
+*/
+
+.message {
+
+    padding:
+        14px 16px;
+
+    border-radius:
+        7px;
+
+    margin-bottom:
+        22px;
+
+    font-size:
+        14px;
+
+    line-height:
+        1.5;
+}
+
+
+.success {
+
+    background:
+        #dcfce7;
+
+    border:
+        1px solid #bbf7d0;
+
+    color:
+        #166534;
+}
+
+
+.error {
+
+    background:
+        #fee2e2;
+
+    border:
+        1px solid #fecaca;
+
+    color:
+        #991b1b;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| FORM
+|--------------------------------------------------------------------------
+*/
+
+.form-group {
+
+    margin-bottom:
+        22px;
+}
+
+
+label {
+
+    display:
+        block;
+
+    margin-bottom:
+        8px;
+
+    font-weight:
+        bold;
+
+    color:
+        #1f2937;
+}
+
+
+input,
+textarea {
+
+    width:
+        100%;
+
+    padding:
+        14px 15px;
+
+    border:
+        1px solid #cbd5e1;
+
+    border-radius:
+        7px;
+
+    font-size:
+        15px;
+
+    font-family:
+        inherit;
+
+    background:
+        #ffffff;
+
+    transition:
+        border-color 0.2s,
+        box-shadow 0.2s;
+}
+
+
+input:focus,
+textarea:focus {
+
+    outline:
+        none;
+
+    border-color:
+        #2563eb;
+
+    box-shadow:
+        0 0 0 3px
+        rgba(
+            37,
+            99,
+            235,
+            0.10
+        );
+}
+
+
+textarea {
+
+    min-height:
+        130px;
+
+    resize:
+        vertical;
+}
+
+
+.row {
+
+    display:
+        grid;
+
+    grid-template-columns:
+        1fr 1fr;
+
+    gap:
+        18px;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| ADDRESS
+|--------------------------------------------------------------------------
+*/
+
+.address-box {
+
+    background:
+        #eff6ff;
+
+    border:
+        1px solid #bfdbfe;
+
+    border-radius:
+        9px;
+
+    padding:
+        20px;
+
+    margin-bottom:
+        22px;
+}
+
+
+.address-box h3 {
+
+    color:
+        #1e40af;
+
+    font-size:
+        17px;
+
+    margin-bottom:
+        7px;
+}
+
+
+.address-box p {
+
+    color:
+        #475569;
+
+    font-size:
+        14px;
+
+    line-height:
+        1.6;
+
+    margin-bottom:
+        16px;
+}
+
+
+.address-help {
+
+    display:
+        block;
+
+    color:
+        #64748b;
+
+    font-size:
+        13px;
+
+    margin-top:
+        8px;
+
+    line-height:
+        1.5;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| BUTTON
+|--------------------------------------------------------------------------
+*/
+
+.save-button {
+
+    display:
+        inline-block;
+
+    min-width:
+        150px;
+
+    padding:
+        13px 22px;
+
+    background:
+        #2563eb;
+
+    color:
+        #ffffff;
+
+    border:
+        none;
+
+    border-radius:
+        7px;
+
+    cursor:
+        pointer;
+
+    font-size:
+        15px;
+
+    font-weight:
+        bold;
+}
+
+
+.save-button:hover {
+
+    background:
+        #1d4ed8;
 }
 
 
@@ -797,15 +1275,8 @@ button:hover {
 */
 
 @media (
-    max-width: 600px
+    max-width: 700px
 ) {
-
-    .row {
-
-        grid-template-columns:
-            1fr;
-    }
-
 
     .navbar {
 
@@ -827,6 +1298,50 @@ button:hover {
 
         justify-content:
             center;
+
+        gap:
+            12px;
+    }
+
+
+    .container {
+
+        margin:
+            25px auto;
+
+        padding:
+            0 15px 35px;
+    }
+
+
+    .card {
+
+        padding:
+            24px 20px;
+    }
+
+
+    h1 {
+
+        font-size:
+            28px;
+    }
+
+
+    .row {
+
+        grid-template-columns:
+            1fr;
+
+        gap:
+            0;
+    }
+
+
+    .save-button {
+
+        width:
+            100%;
     }
 
 }
@@ -847,30 +1362,49 @@ button:hover {
 
 
     <div class="logo">
+
         JobPortal
+
     </div>
 
 
     <div class="nav-links">
 
-        <a href="../index.php">Home</a>
-        
-        <a href="dashboard.php">Dashboard</a>
-        
-        <a href="../jobs/index.php">Find Jobs</a>
+        <a href="../index.php">
+            Home
+        </a>
 
-        <a href="profile.php">Profile</a>
+        <a href="dashboard.php">
+            Dashboard
+        </a>
 
-        <a href="resume.php">Resume</a>
+        <a href="../jobs/index.php">
+            Find Jobs
+        </a>
 
-        <a href="applications.php">Applications</a>
+        <a href="profile.php">
+            Profile
+        </a>
 
-        <a href="../logout.php" class="logout">Logout</a>
+        <a href="resume.php">
+            Resume
+        </a>
+
+        <a href="applications.php">
+            Applications
+        </a>
+
+        <a
+            href="../logout.php"
+            class="logout"
+        >
+            Logout
+        </a>
 
     </div>
 
-</nav>
 
+</nav>
 
 
 <!-- =========================================================
@@ -888,7 +1422,6 @@ button:hover {
     </a>
 
 
-
     <div class="card">
 
 
@@ -899,24 +1432,21 @@ button:hover {
 
         <p class="subtitle">
 
-            Update your personal information
-            and current location.
+            Update your personal information and current address.
 
         </p>
 
 
+        <!-- =====================================================
+             SUCCESS
+        ====================================================== -->
 
         <?php if ($success): ?>
 
 
-            <div
-                class="
-                    message
-                    success
-                "
-            >
+            <div class="message success">
 
-                <?= htmlspecialchars(
+                ✓ <?= htmlspecialchars(
                     $success
                 ) ?>
 
@@ -926,16 +1456,14 @@ button:hover {
         <?php endif; ?>
 
 
+        <!-- =====================================================
+             ERROR
+        ====================================================== -->
 
         <?php if ($error): ?>
 
 
-            <div
-                class="
-                    message
-                    error
-                "
-            >
+            <div class="message error">
 
                 <?= htmlspecialchars(
                     $error
@@ -947,6 +1475,9 @@ button:hover {
         <?php endif; ?>
 
 
+        <!-- =====================================================
+             FORM
+        ====================================================== -->
 
         <form method="POST">
 
@@ -960,19 +1491,20 @@ button:hover {
 
                 <div class="form-group">
 
-                    <label>
+                    <label for="first_name">
                         First Name
                     </label>
 
-
                     <input
                         type="text"
+                        id="first_name"
                         name="first_name"
 
                         value="<?= htmlspecialchars(
                             $applicant[
                                 "first_name"
                             ]
+                            ?? ""
                         ) ?>"
 
                         required
@@ -981,22 +1513,22 @@ button:hover {
                 </div>
 
 
-
                 <div class="form-group">
 
-                    <label>
+                    <label for="last_name">
                         Last Name
                     </label>
 
-
                     <input
                         type="text"
+                        id="last_name"
                         name="last_name"
 
                         value="<?= htmlspecialchars(
                             $applicant[
                                 "last_name"
                             ]
+                            ?? ""
                         ) ?>"
 
                         required
@@ -1008,21 +1540,22 @@ button:hover {
             </div>
 
 
-
             <!-- =================================================
                  PHONE
             ================================================== -->
 
             <div class="form-group">
 
-                <label>
+                <label for="phone">
                     Phone
                 </label>
 
-
                 <input
                     type="text"
+                    id="phone"
                     name="phone"
+
+                    placeholder="Example: 09123456789"
 
                     value="<?= htmlspecialchars(
                         $applicant[
@@ -1035,159 +1568,70 @@ button:hover {
             </div>
 
 
-
             <!-- =================================================
                  ADDRESS
             ================================================== -->
 
-            <div class="form-group">
-
-                <label>
-                    Address
-                </label>
-
-
-                <input
-                    type="text"
-                    name="address"
-
-                    placeholder="Enter your current address"
-
-                    value="<?= htmlspecialchars(
-                        $applicant[
-                            "address"
-                        ]
-                        ?? ""
-                    ) ?>"
-                >
-
-            </div>
-
-
-
-            <!-- =================================================
-                 CURRENT LOCATION
-            ================================================== -->
-
-            <div class="location-card">
+            <div class="address-box">
 
 
                 <h3>
-                    📍 Current Location
+                    📍 Current Address
                 </h3>
 
 
                 <p>
 
-                    Use your device location so
-                    the Job Portal can calculate
-                    how far job postings are from you.
+                    Enter your complete current address.
+                    The system will automatically determine
+                    its location for calculating the distance
+                    between you and available jobs.
 
                 </p>
 
 
-
-                <button
-                    type="button"
-                    class="location-btn"
-                    id="locationButton"
-                    onclick="getCurrentLocation()"
-                >
-
-                    Use My Current Location
-
-                </button>
-
-
-
-                <div class="row">
-
-
-                    <!-- LATITUDE -->
-
-                    <div class="form-group">
-
-                        <label>
-                            Latitude
-                        </label>
-
-
-                        <input
-                            type="text"
-                            name="latitude"
-                            id="latitude"
-                            class="readonly-input"
-
-                            value="<?= htmlspecialchars(
-                                $applicant[
-                                    "latitude"
-                                ]
-                                ?? ""
-                            ) ?>"
-                        >
-
-                    </div>
-
-
-
-                    <!-- LONGITUDE -->
-
-                    <div class="form-group">
-
-                        <label>
-                            Longitude
-                        </label>
-
-
-                        <input
-                            type="text"
-                            name="longitude"
-                            id="longitude"
-                            class="readonly-input"
-
-                            value="<?= htmlspecialchars(
-                                $applicant[
-                                    "longitude"
-                                ]
-                                ?? ""
-                            ) ?>"
-                        >
-
-                    </div>
-
-
-                </div>
-
-
-
                 <div
-                    id="locationStatus"
-                    class="location-status"
+                    class="form-group"
+                    style="margin-bottom:0;"
                 >
 
-                    <?php if (
-                        !empty(
-                            $applicant[
-                                "latitude"
-                            ]
-                        )
-                        &&
-                        !empty(
-                            $applicant[
-                                "longitude"
-                            ]
-                        )
-                    ): ?>
+                    <label for="address">
+                        Address
+                    </label>
 
-                        ✓ Location coordinates saved.
 
-                    <?php endif; ?>
+                    <input
+                        type="text"
+                        id="address"
+                        name="address"
+
+                        placeholder="Example: Phase 5, Brgy. 176, Bagong Silang, Caloocan City"
+
+                        value="<?= htmlspecialchars(
+                            $applicant[
+                                "address"
+                            ]
+                            ?? ""
+                        ) ?>"
+
+                        required
+                    >
+
+
+                    <small class="address-help">
+
+                        Please include your street,
+                        subdivision or area, barangay,
+                        and Caloocan City for better
+                        location accuracy.
+
+                    </small>
+
 
                 </div>
 
 
             </div>
-
 
 
             <!-- =================================================
@@ -1196,13 +1640,13 @@ button:hover {
 
             <div class="form-group">
 
-                <label>
+                <label for="religion">
                     Religion
                 </label>
 
-
                 <input
                     type="text"
+                    id="religion"
                     name="religion"
 
                     value="<?= htmlspecialchars(
@@ -1216,21 +1660,22 @@ button:hover {
             </div>
 
 
-
             <!-- =================================================
                  EDUCATION
             ================================================== -->
 
             <div class="form-group">
 
-                <label>
+                <label for="education">
                     Education
                 </label>
 
-
                 <input
                     type="text"
+                    id="education"
                     name="education"
+
+                    placeholder="Example: Bachelor's Degree in Information Technology"
 
                     value="<?= htmlspecialchars(
                         $applicant[
@@ -1243,19 +1688,19 @@ button:hover {
             </div>
 
 
-
             <!-- =================================================
                  BIO
             ================================================== -->
 
             <div class="form-group">
 
-                <label>
+                <label for="bio">
                     Bio
                 </label>
 
 
                 <textarea
+                    id="bio"
                     name="bio"
                     placeholder="Tell employers a little about yourself..."
                 ><?= htmlspecialchars(
@@ -1265,11 +1710,18 @@ button:hover {
                     ?? ""
                 ) ?></textarea>
 
+
             </div>
 
 
+            <!-- =================================================
+                 SUBMIT
+            ================================================== -->
 
-            <button type="submit">
+            <button
+                type="submit"
+                class="save-button"
+            >
 
                 Save Changes
 
@@ -1281,204 +1733,8 @@ button:hover {
 
     </div>
 
+
 </div>
-
-
-
-<!-- =========================================================
-     GEOLOCATION
-========================================================= -->
-
-<script>
-
-function getCurrentLocation()
-{
-
-    const latitude =
-        document.getElementById(
-            "latitude"
-        );
-
-
-    const longitude =
-        document.getElementById(
-            "longitude"
-        );
-
-
-    const status =
-        document.getElementById(
-            "locationStatus"
-        );
-
-
-    const button =
-        document.getElementById(
-            "locationButton"
-        );
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | GEOLOCATION SUPPORT
-    |--------------------------------------------------------------------------
-    */
-
-    if (
-        !navigator.geolocation
-    ) {
-
-        status.innerHTML =
-            "⚠ Geolocation is not supported by your browser.";
-
-        return;
-    }
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | LOADING
-    |--------------------------------------------------------------------------
-    */
-
-    button.disabled =
-        true;
-
-
-    button.innerHTML =
-        "Getting Location...";
-
-
-    status.innerHTML =
-        "Detecting your current location...";
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | GET CURRENT POSITION
-    |--------------------------------------------------------------------------
-    */
-
-    navigator.geolocation.getCurrentPosition(
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | SUCCESS
-        |--------------------------------------------------------------------------
-        */
-
-        function(position)
-        {
-
-            latitude.value =
-                position.coords.latitude
-                    .toFixed(8);
-
-
-            longitude.value =
-                position.coords.longitude
-                    .toFixed(8);
-
-
-            status.innerHTML =
-                "✓ Current location detected. Click Save Changes to save it.";
-
-
-            button.disabled =
-                false;
-
-
-            button.innerHTML =
-                "Update Current Location";
-
-        },
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | ERROR
-        |--------------------------------------------------------------------------
-        */
-
-        function(error)
-        {
-
-            button.disabled =
-                false;
-
-
-            button.innerHTML =
-                "Use My Current Location";
-
-
-            if (
-                error.code ===
-                error.PERMISSION_DENIED
-            ) {
-
-                status.innerHTML =
-                    "⚠ Location permission denied. Please allow location access.";
-
-            }
-
-
-            else if (
-                error.code ===
-                error.POSITION_UNAVAILABLE
-            ) {
-
-                status.innerHTML =
-                    "⚠ Your location is currently unavailable.";
-
-            }
-
-
-            else if (
-                error.code ===
-                error.TIMEOUT
-            ) {
-
-                status.innerHTML =
-                    "⚠ Location request timed out. Please try again.";
-
-            }
-
-
-            else {
-
-                status.innerHTML =
-                    "⚠ Unable to detect your location.";
-
-            }
-
-        },
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | OPTIONS
-        |--------------------------------------------------------------------------
-        */
-
-        {
-
-            enableHighAccuracy:
-                true,
-
-            timeout:
-                15000,
-
-            maximumAge:
-                60000
-
-        }
-
-    );
-
-}
-
-</script>
 
 
 </body>

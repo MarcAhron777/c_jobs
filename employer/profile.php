@@ -20,7 +20,7 @@ if (
 }
 
 
-$userId = $_SESSION["user_id"];
+$userId = (int) $_SESSION["user_id"];
 
 $success = "";
 $error = "";
@@ -54,17 +54,15 @@ function uploadDocument($file, $uploadDir)
         return null;
     }
 
-
     if ($file["error"] !== UPLOAD_ERR_OK) {
         throw new Exception(
             "There was an error uploading the file."
         );
     }
 
-
     /*
     |--------------------------------------------------------------------------
-    | Maximum file size: 5MB
+    | MAX FILE SIZE: 5MB
     |--------------------------------------------------------------------------
     */
 
@@ -77,7 +75,7 @@ function uploadDocument($file, $uploadDir)
 
     /*
     |--------------------------------------------------------------------------
-    | Check MIME Type
+    | MIME TYPE
     |--------------------------------------------------------------------------
     */
 
@@ -88,14 +86,22 @@ function uploadDocument($file, $uploadDir)
     ];
 
 
-    $finfo = new finfo(FILEINFO_MIME_TYPE);
-
-    $mimeType = $finfo->file(
-        $file["tmp_name"]
+    $finfo = new finfo(
+        FILEINFO_MIME_TYPE
     );
 
 
-    if (!isset($allowedTypes[$mimeType])) {
+    $mimeType =
+        $finfo->file(
+            $file["tmp_name"]
+        );
+
+
+    if (
+        !isset(
+            $allowedTypes[$mimeType]
+        )
+    ) {
         throw new Exception(
             "Only JPG, PNG, and PDF files are allowed."
         );
@@ -104,7 +110,7 @@ function uploadDocument($file, $uploadDir)
 
     /*
     |--------------------------------------------------------------------------
-    | Generate Random Filename
+    | RANDOM FILE NAME
     |--------------------------------------------------------------------------
     */
 
@@ -113,7 +119,9 @@ function uploadDocument($file, $uploadDir)
 
 
     $filename =
-        bin2hex(random_bytes(16))
+        bin2hex(
+            random_bytes(16)
+        )
         . "."
         . $extension;
 
@@ -141,44 +149,108 @@ function uploadDocument($file, $uploadDir)
 
 /*
 |--------------------------------------------------------------------------
+| STATUS HELPERS
+|--------------------------------------------------------------------------
+*/
+
+function verificationStatusClass($status)
+{
+    switch ($status) {
+
+        case "approved":
+        case "passed":
+            return "approved-status";
+
+        case "pending":
+        case "processing":
+            return "pending-status";
+
+        case "rejected":
+        case "failed":
+            return "rejected-status";
+
+        case "needs_review":
+            return "review-status";
+
+        default:
+            return "unverified-status";
+    }
+}
+
+
+function verificationStatusLabel($status)
+{
+    if (!$status) {
+        return "Unverified";
+    }
+
+    return ucwords(
+        str_replace(
+            "_",
+            " ",
+            $status
+        )
+    );
+}
+
+
+/*
+|--------------------------------------------------------------------------
 | GET EMPLOYER
 |--------------------------------------------------------------------------
 */
 
-$stmt = $pdo->prepare("
-    SELECT
-        id,
-        user_id,
-        company_name,
-        company_description,
-        company_logo,
-        contact_person,
-        contact_number,
-        address,
-        barangay,
-        latitude,
-        longitude,
-        caloocan_area,
-        verification_status,
-        created_at,
-        updated_at
-    FROM employers
-    WHERE user_id = ?
-    LIMIT 1
-");
+$stmt =
+    $pdo->prepare("
+
+        SELECT
+
+            id,
+            user_id,
+            company_name,
+            company_description,
+            company_logo,
+            contact_person,
+            contact_number,
+            address,
+            barangay,
+            latitude,
+            longitude,
+            caloocan_area,
+            verification_status,
+            created_at,
+            updated_at
+
+        FROM employers
+
+        WHERE user_id = ?
+
+        LIMIT 1
+
+    ");
 
 
-$stmt->execute([$userId]);
+$stmt->execute([
+    $userId
+]);
 
-$employer = $stmt->fetch();
+
+$employer =
+    $stmt->fetch(
+        PDO::FETCH_ASSOC
+    );
 
 
 if (!$employer) {
-    die("Employer profile not found.");
+
+    die(
+        "Employer profile not found."
+    );
 }
 
 
-$employerId = $employer["id"];
+$employerId =
+    (int) $employer["id"];
 
 
 /*
@@ -187,17 +259,29 @@ $employerId = $employer["id"];
 |--------------------------------------------------------------------------
 */
 
-$stmt = $pdo->prepare("
-    SELECT *
-    FROM employer_verifications
-    WHERE employer_id = ?
-    LIMIT 1
-");
+$stmt =
+    $pdo->prepare("
+
+        SELECT *
+
+        FROM employer_verifications
+
+        WHERE employer_id = ?
+
+        LIMIT 1
+
+    ");
 
 
-$stmt->execute([$employerId]);
+$stmt->execute([
+    $employerId
+]);
 
-$verification = $stmt->fetch();
+
+$verification =
+    $stmt->fetch(
+        PDO::FETCH_ASSOC
+    );
 
 
 /*
@@ -206,13 +290,16 @@ $verification = $stmt->fetch();
 |--------------------------------------------------------------------------
 */
 
-if ($_SERVER["REQUEST_METHOD"] === "POST") {
+if (
+    $_SERVER["REQUEST_METHOD"]
+    === "POST"
+) {
 
     try {
 
         /*
         |--------------------------------------------------------------------------
-        | INPUT
+        | INPUTS
         |--------------------------------------------------------------------------
         */
 
@@ -260,61 +347,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         /*
         |--------------------------------------------------------------------------
-        | DETECT NORTH / SOUTH CALOOCAN
+        | HIDDEN COORDINATES
         |--------------------------------------------------------------------------
         */
-
-        $caloocanArea = null;
-
-        $barangayNumber = null;
-
-
-        preg_match(
-            '/\d+/',
-            $barangay,
-            $barangayMatch
-        );
-
-
-        if (!empty($barangayMatch)) {
-
-            $barangayNumber =
-                (int) $barangayMatch[0];
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | SOUTH CALOOCAN
-            |--------------------------------------------------------------------------
-            */
-
-            if (
-                $barangayNumber >= 1 &&
-                $barangayNumber <= 164
-            ) {
-
-                $caloocanArea = "south";
-
-            }
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | NORTH CALOOCAN
-            |--------------------------------------------------------------------------
-            */
-
-            elseif (
-                $barangayNumber >= 165 &&
-                $barangayNumber <= 188
-            ) {
-
-                $caloocanArea = "north";
-
-            }
-
-        }
-
 
         $latitude =
             trim(
@@ -332,50 +367,110 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         /*
         |--------------------------------------------------------------------------
-        | BASIC VALIDATION
+        | DETECT NORTH / SOUTH CALOOCAN
         |--------------------------------------------------------------------------
         */
 
-        if ($companyName === "") {
+        $caloocanArea = null;
 
+        $barangayNumber = null;
+
+
+        preg_match(
+            '/\d+/',
+            $barangay,
+            $barangayMatch
+        );
+
+
+        if (
+            !empty(
+                $barangayMatch
+            )
+        ) {
+
+            $barangayNumber =
+                (int)
+                $barangayMatch[0];
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | SOUTH CALOOCAN
+            |--------------------------------------------------------------------------
+            */
+
+            if (
+                $barangayNumber >= 1 &&
+                $barangayNumber <= 164
+            ) {
+
+                $caloocanArea =
+                    "south";
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | NORTH CALOOCAN
+            |--------------------------------------------------------------------------
+            */
+
+            } elseif (
+                $barangayNumber >= 165 &&
+                $barangayNumber <= 188
+            ) {
+
+                $caloocanArea =
+                    "north";
+            }
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | VALIDATION
+        |--------------------------------------------------------------------------
+        */
+
+        if (
+            $companyName === ""
+        ) {
             throw new Exception(
                 "Company name is required."
             );
         }
 
 
-        if ($contactPerson === "") {
-
+        if (
+            $contactPerson === ""
+        ) {
             throw new Exception(
                 "Contact person is required."
             );
         }
 
 
-        if ($address === "") {
-
+        if (
+            $address === ""
+        ) {
             throw new Exception(
                 "Company address is required."
             );
         }
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | BARANGAY VALIDATION
-        |--------------------------------------------------------------------------
-        */
-
-        if ($barangay === "") {
-
+        if (
+            $barangay === ""
+        ) {
             throw new Exception(
                 "Barangay is required."
             );
         }
 
 
-        if ($caloocanArea === null) {
-
+        if (
+            $caloocanArea === null
+        ) {
             throw new Exception(
                 "Please enter a valid Caloocan barangay number from 1 to 188."
             );
@@ -394,7 +489,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         ) {
 
             throw new Exception(
-                "Please set your business location."
+                "Please click Use My Current Location to set your business location."
             );
         }
 
@@ -405,52 +500,107 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         ) {
 
             throw new Exception(
-                "Invalid latitude or longitude."
+                "Invalid business location."
             );
         }
 
 
         /*
         |--------------------------------------------------------------------------
-        | UPDATE EMPLOYER PROFILE
+        | VALIDATE COORDINATE RANGE
         |--------------------------------------------------------------------------
         */
 
-        $stmt = $pdo->prepare("
-            UPDATE employers
-            SET
-                company_name = ?,
-                company_description = ?,
-                contact_person = ?,
-                contact_number = ?,
-                address = ?,
-                barangay = ?,
-                latitude = ?,
-                longitude = ?,
-                caloocan_area = ?,
-                verification_status = 'pending',
-                updated_at = NOW()
-            WHERE id = ?
-        ");
+        $latitudeValue =
+            (float) $latitude;
+
+
+        $longitudeValue =
+            (float) $longitude;
+
+
+        if (
+            $latitudeValue < -90 ||
+            $latitudeValue > 90
+        ) {
+            throw new Exception(
+                "Invalid latitude."
+            );
+        }
+
+
+        if (
+            $longitudeValue < -180 ||
+            $longitudeValue > 180
+        ) {
+            throw new Exception(
+                "Invalid longitude."
+            );
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | UPDATE EMPLOYER
+        |--------------------------------------------------------------------------
+        */
+
+        $stmt =
+            $pdo->prepare("
+
+                UPDATE employers
+
+                SET
+
+                    company_name = ?,
+                    company_description = ?,
+                    contact_person = ?,
+                    contact_number = ?,
+                    address = ?,
+                    barangay = ?,
+                    latitude = ?,
+                    longitude = ?,
+                    caloocan_area = ?,
+                    verification_status = 'pending',
+                    updated_at = NOW()
+
+                WHERE id = ?
+
+            ");
 
 
         $stmt->execute([
+
             $companyName,
-            $companyDescription,
+
+            $companyDescription !== ""
+                ? $companyDescription
+                : null,
+
             $contactPerson,
-            $contactNumber,
+
+            $contactNumber !== ""
+                ? $contactNumber
+                : null,
+
             $address,
+
             $barangay,
-            $latitude,
-            $longitude,
+
+            $latitudeValue,
+
+            $longitudeValue,
+
             $caloocanArea,
+
             $employerId
+
         ]);
 
 
         /*
         |--------------------------------------------------------------------------
-        | UPLOAD VERIFICATION DOCUMENTS
+        | UPLOAD DOCUMENTS
         |--------------------------------------------------------------------------
         */
 
@@ -480,7 +630,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         /*
         |--------------------------------------------------------------------------
-        | KEEP OLD FILES IF USER DID NOT UPLOAD NEW FILE
+        | KEEP OLD DOCUMENTS
         |--------------------------------------------------------------------------
         */
 
@@ -491,7 +641,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $governmentId =
                     $verification[
                         "government_id"
-                    ];
+                    ]
+                    ?? null;
             }
 
 
@@ -500,7 +651,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $barangayCertificate =
                     $verification[
                         "barangay_certificate"
-                    ];
+                    ]
+                    ?? null;
             }
 
 
@@ -509,7 +661,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $businessPermit =
                     $verification[
                         "business_permit"
-                    ];
+                    ]
+                    ?? null;
             }
         }
 
@@ -522,61 +675,86 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         if ($verification) {
 
-            $stmt = $pdo->prepare("
-                UPDATE employer_verifications
-                SET
-                    government_id = ?,
-                    barangay_certificate = ?,
-                    business_permit = ?,
-                    detected_address = NULL,
-                    document_status = 'pending',
-                    location_status = 'pending',
-                    admin_status = 'pending',
-                    submitted_at = NOW()
-                WHERE employer_id = ?
-            ");
+            $stmt =
+                $pdo->prepare("
+
+                    UPDATE employer_verifications
+
+                    SET
+
+                        government_id = ?,
+                        barangay_certificate = ?,
+                        business_permit = ?,
+
+                        detected_address = NULL,
+
+                        document_status = 'pending',
+                        location_status = 'pending',
+                        admin_status = 'pending',
+
+                        submitted_at = NOW()
+
+                    WHERE employer_id = ?
+
+                ");
 
 
             $stmt->execute([
+
                 $governmentId,
+
                 $barangayCertificate,
+
                 $businessPermit,
+
                 $employerId
+
             ]);
 
         } else {
 
-            $stmt = $pdo->prepare("
-                INSERT INTO employer_verifications (
-                    employer_id,
-                    government_id,
-                    barangay_certificate,
-                    business_permit,
-                    detected_address,
-                    document_status,
-                    location_status,
-                    admin_status,
-                    submitted_at
-                )
-                VALUES (
-                    ?,
-                    ?,
-                    ?,
-                    ?,
-                    NULL,
-                    'pending',
-                    'pending',
-                    'pending',
-                    NOW()
-                )
-            ");
+            $stmt =
+                $pdo->prepare("
+
+                    INSERT INTO employer_verifications
+                    (
+                        employer_id,
+                        government_id,
+                        barangay_certificate,
+                        business_permit,
+                        detected_address,
+                        document_status,
+                        location_status,
+                        admin_status,
+                        submitted_at
+                    )
+
+                    VALUES
+                    (
+                        ?,
+                        ?,
+                        ?,
+                        ?,
+                        NULL,
+                        'pending',
+                        'pending',
+                        'pending',
+                        NOW()
+                    )
+
+                ");
 
 
             $stmt->execute([
+
                 $employerId,
+
                 $governmentId,
+
                 $barangayCertificate,
+
                 $businessPermit
+
             ]);
         }
 
@@ -588,28 +766,41 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         */
 
         $success =
-            "Profile saved successfully. Your area was detected as "
+            "Profile saved successfully. "
+            . "Your area was detected as "
             . strtoupper($caloocanArea)
             . " CALOOCAN.";
 
 
         /*
         |--------------------------------------------------------------------------
-        | RELOAD EMPLOYER DATA
+        | RELOAD EMPLOYER
         |--------------------------------------------------------------------------
         */
 
-        $stmt = $pdo->prepare("
-            SELECT *
-            FROM employers
-            WHERE id = ?
-            LIMIT 1
-        ");
+        $stmt =
+            $pdo->prepare("
+
+                SELECT *
+
+                FROM employers
+
+                WHERE id = ?
+
+                LIMIT 1
+
+            ");
 
 
-        $stmt->execute([$employerId]);
+        $stmt->execute([
+            $employerId
+        ]);
 
-        $employer = $stmt->fetch();
+
+        $employer =
+            $stmt->fetch(
+                PDO::FETCH_ASSOC
+            );
 
 
         /*
@@ -618,94 +809,54 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         |--------------------------------------------------------------------------
         */
 
-        $stmt = $pdo->prepare("
-            SELECT *
-            FROM employer_verifications
-            WHERE employer_id = ?
-            LIMIT 1
-        ");
+        $stmt =
+            $pdo->prepare("
+
+                SELECT *
+
+                FROM employer_verifications
+
+                WHERE employer_id = ?
+
+                LIMIT 1
+
+            ");
 
 
-        $stmt->execute([$employerId]);
+        $stmt->execute([
+            $employerId
+        ]);
 
-        $verification = $stmt->fetch();
+
+        $verification =
+            $stmt->fetch(
+                PDO::FETCH_ASSOC
+            );
 
 
-    } catch (Exception $e) {
+    } catch (
+        PDOException $e
+    ) {
+
+        error_log(
+            $e->getMessage()
+        );
+
+
+        $error =
+            "Database error. Please try again.";
+
+
+    } catch (
+        Exception $e
+    ) {
 
         $error =
             $e->getMessage();
     }
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| STATUS HELPER
-|--------------------------------------------------------------------------
-*/
-
-function verificationStatusClass($status)
-{
-
-    switch ($status) {
-
-        case "approved":
-        case "passed":
-
-            return "approved-status";
-
-
-        case "pending":
-        case "processing":
-
-            return "pending-status";
-
-
-        case "rejected":
-        case "failed":
-
-            return "rejected-status";
-
-
-        case "needs_review":
-
-            return "review-status";
-
-
-        default:
-
-            return "unverified-status";
-    }
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| STATUS LABEL
-|--------------------------------------------------------------------------
-*/
-
-function verificationStatusLabel($status)
-{
-
-    if (!$status) {
-
-        return "Unverified";
-    }
-
-
-    return ucwords(
-        str_replace(
-            "_",
-            " ",
-            $status
-        )
-    );
-}
-
 ?>
-
 
 <!DOCTYPE html>
 
@@ -727,15 +878,7 @@ function verificationStatusLabel($status)
 
 <style>
 
-
-/*
-|--------------------------------------------------------------------------
-| BASE
-|--------------------------------------------------------------------------
-*/
-
 * {
-
     box-sizing:
         border-box;
 
@@ -751,6 +894,7 @@ body {
 
     font-family:
         Arial,
+        Helvetica,
         sans-serif;
 
     background:
@@ -770,10 +914,10 @@ body {
 .navbar {
 
     background:
-        white;
+        #ffffff;
 
     border-bottom:
-        1px solid #ddd;
+        1px solid #e5e7eb;
 
     padding:
         16px 40px;
@@ -822,10 +966,14 @@ body {
 
     color:
         #333;
+
+    font-size:
+        14px;
 }
 
 
-.nav-links a:hover {
+.nav-links a:hover,
+.nav-links .active {
 
     color:
         #2563eb;
@@ -833,9 +981,6 @@ body {
 
 
 .nav-links .active {
-
-    color:
-        #2563eb;
 
     font-weight:
         bold;
@@ -864,15 +1009,9 @@ body {
         40px auto;
 
     padding:
-        0 20px;
+        0 20px 50px;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| PAGE HEADER
-|--------------------------------------------------------------------------
-*/
 
 .welcome {
 
@@ -985,9 +1124,17 @@ body {
     border-radius:
         10px;
 
+    border:
+        1px solid #e5e7eb;
+
     box-shadow:
         0 2px 10px
-        rgba(0,0,0,0.05);
+        rgba(
+            0,
+            0,
+            0,
+            0.05
+        );
 
     margin-bottom:
         20px;
@@ -1105,7 +1252,12 @@ textarea:focus {
 
     box-shadow:
         0 0 0 2px
-        rgba(37,99,235,0.08);
+        rgba(
+            37,
+            99,
+            235,
+            0.08
+        );
 }
 
 
@@ -1121,7 +1273,7 @@ textarea {
 
 /*
 |--------------------------------------------------------------------------
-| BUTTONS
+| BUTTON
 |--------------------------------------------------------------------------
 */
 
@@ -1131,16 +1283,13 @@ textarea {
         inline-block;
 
     padding:
-        10px 15px;
+        11px 16px;
 
     background:
         #2563eb;
 
     color:
         white;
-
-    text-decoration:
-        none;
 
     border:
         none;
@@ -1154,8 +1303,8 @@ textarea {
     font-size:
         14px;
 
-    font-weight:
-        normal;
+    text-decoration:
+        none;
 }
 
 
@@ -1166,23 +1315,19 @@ textarea {
 }
 
 
-.btn-secondary {
+.btn:disabled {
 
-    background:
-        #64748b;
-}
+    opacity:
+        0.65;
 
-
-.btn-secondary:hover {
-
-    background:
-        #475569;
+    cursor:
+        not-allowed;
 }
 
 
 /*
 |--------------------------------------------------------------------------
-| LOCATION STATUS
+| LOCATION
 |--------------------------------------------------------------------------
 */
 
@@ -1210,12 +1355,6 @@ textarea {
         1.5;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| AREA RESULT
-|--------------------------------------------------------------------------
-*/
 
 .area-south {
 
@@ -1249,54 +1388,7 @@ textarea {
 
 /*
 |--------------------------------------------------------------------------
-| COORDINATES
-|--------------------------------------------------------------------------
-*/
-
-.coordinates {
-
-    display:
-        grid;
-
-    grid-template-columns:
-        1fr 1fr;
-
-    gap:
-        15px;
-
-    margin-top:
-        20px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| MAP
-|--------------------------------------------------------------------------
-*/
-
-#map {
-
-    width:
-        100%;
-
-    height:
-        350px;
-
-    border:
-        1px solid #ddd;
-
-    border-radius:
-        8px;
-
-    margin-top:
-        5px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| DOCUMENT BOX
+| DOCUMENTS
 |--------------------------------------------------------------------------
 */
 
@@ -1382,6 +1474,34 @@ input[type="file"] {
 
     color:
         #166534;
+}
+
+
+.verification-note {
+
+    background:
+        #f8fafc;
+
+    padding:
+        15px;
+
+    border-radius:
+        8px;
+
+    border:
+        1px solid #e2e8f0;
+
+    font-size:
+        13px;
+
+    line-height:
+        1.6;
+
+    color:
+        #555;
+
+    margin-top:
+        20px;
 }
 
 
@@ -1490,46 +1610,6 @@ input[type="file"] {
 }
 
 
-/*
-|--------------------------------------------------------------------------
-| VERIFICATION INFO
-|--------------------------------------------------------------------------
-*/
-
-.verification-note {
-
-    background:
-        #f8fafc;
-
-    padding:
-        15px;
-
-    border-radius:
-        8px;
-
-    border:
-        1px solid #e2e8f0;
-
-    font-size:
-        13px;
-
-    line-height:
-        1.6;
-
-    color:
-        #555;
-
-    margin-top:
-        20px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| COMPANY INFO
-|--------------------------------------------------------------------------
-*/
-
 .company-info p {
 
     line-height:
@@ -1543,7 +1623,9 @@ input[type="file"] {
 |--------------------------------------------------------------------------
 */
 
-@media (max-width: 800px) {
+@media (
+    max-width: 800px
+) {
 
     .profile-grid {
 
@@ -1564,18 +1646,12 @@ input[type="file"] {
         grid-column:
             auto;
     }
-
-
-    .coordinates {
-
-        grid-template-columns:
-            1fr;
-    }
-
 }
 
 
-@media (max-width: 650px) {
+@media (
+    max-width: 650px
+) {
 
     .navbar {
 
@@ -1612,7 +1688,7 @@ input[type="file"] {
             25px auto;
 
         padding:
-            0 15px;
+            0 15px 35px;
     }
 
 
@@ -1621,14 +1697,6 @@ input[type="file"] {
         padding:
             20px;
     }
-
-
-    #map {
-
-        height:
-            280px;
-    }
-
 }
 
 </style>
@@ -1645,12 +1713,16 @@ input[type="file"] {
 
 <nav class="navbar">
 
+
     <div class="logo">
+
         JobPortal
+
     </div>
 
 
     <div class="nav-links">
+
 
         <a href="../index.php">
             Home
@@ -1687,14 +1759,15 @@ input[type="file"] {
             Logout
         </a>
 
+
     </div>
+
 
 </nav>
 
 
-
 <!-- =========================================================
-     MAIN CONTENT
+     MAIN
 ========================================================= -->
 
 <div class="container">
@@ -1702,50 +1775,60 @@ input[type="file"] {
 
     <div class="welcome">
 
+
         <h1>
             Employer Profile
         </h1>
 
+
         <p>
+
             Manage your company information,
             business location and verification
             documents.
+
         </p>
+
 
     </div>
 
 
-
     <!-- =====================================================
-         SUCCESS MESSAGE
+         SUCCESS
     ====================================================== -->
 
     <?php if ($success): ?>
 
+
         <div class="alert alert-success">
 
-            <?= htmlspecialchars($success) ?>
+            <?= htmlspecialchars(
+                $success
+            ) ?>
 
         </div>
+
 
     <?php endif; ?>
 
 
-
     <!-- =====================================================
-         ERROR MESSAGE
+         ERROR
     ====================================================== -->
 
     <?php if ($error): ?>
 
+
         <div class="alert alert-error">
 
-            <?= htmlspecialchars($error) ?>
+            <?= htmlspecialchars(
+                $error
+            ) ?>
 
         </div>
 
-    <?php endif; ?>
 
+    <?php endif; ?>
 
 
     <form
@@ -1770,6 +1853,7 @@ input[type="file"] {
 
                 <div class="card">
 
+
                     <h2>
                         Company Information
                     </h2>
@@ -1790,6 +1874,7 @@ input[type="file"] {
 
                         <div class="form-group">
 
+
                             <label>
                                 Company Name *
                             </label>
@@ -1800,23 +1885,22 @@ input[type="file"] {
                                 name="company_name"
                                 required
 
-                                value="<?=
-                                    htmlspecialchars(
-                                        $employer[
-                                            "company_name"
-                                        ]
-                                        ?? ""
-                                    )
-                                ?>"
+                                value="<?= htmlspecialchars(
+                                    $employer[
+                                        "company_name"
+                                    ]
+                                    ?? ""
+                                ) ?>"
                             >
 
-                        </div>
 
+                        </div>
 
 
                         <!-- CONTACT PERSON -->
 
                         <div class="form-group">
+
 
                             <label>
                                 Contact Person *
@@ -1828,23 +1912,22 @@ input[type="file"] {
                                 name="contact_person"
                                 required
 
-                                value="<?=
-                                    htmlspecialchars(
-                                        $employer[
-                                            "contact_person"
-                                        ]
-                                        ?? ""
-                                    )
-                                ?>"
+                                value="<?= htmlspecialchars(
+                                    $employer[
+                                        "contact_person"
+                                    ]
+                                    ?? ""
+                                ) ?>"
                             >
 
-                        </div>
 
+                        </div>
 
 
                         <!-- CONTACT NUMBER -->
 
                         <div class="form-group">
+
 
                             <label>
                                 Contact Number
@@ -1857,23 +1940,22 @@ input[type="file"] {
 
                                 placeholder="09XXXXXXXXX"
 
-                                value="<?=
-                                    htmlspecialchars(
-                                        $employer[
-                                            "contact_number"
-                                        ]
-                                        ?? ""
-                                    )
-                                ?>"
+                                value="<?= htmlspecialchars(
+                                    $employer[
+                                        "contact_number"
+                                    ]
+                                    ?? ""
+                                ) ?>"
                             >
 
-                        </div>
 
+                        </div>
 
 
                         <!-- DESCRIPTION -->
 
                         <div class="form-group full">
+
 
                             <label>
                                 Company Description
@@ -1890,13 +1972,14 @@ input[type="file"] {
                                 ?? ""
                             ) ?></textarea>
 
+
                         </div>
 
 
                     </div>
 
-                </div>
 
+                </div>
 
 
                 <!-- =================================================
@@ -1905,6 +1988,7 @@ input[type="file"] {
 
                 <div class="card">
 
+
                     <h2>
                         Business Location
                     </h2>
@@ -1912,17 +1996,18 @@ input[type="file"] {
 
                     <p class="card-description">
 
-                        Set the exact location of
-                        your company or business
-                        in Caloocan.
+                        Enter your business address
+                        and barangay, then use your
+                        current location to save the
+                        exact coordinates of your business.
 
                     </p>
-
 
 
                     <!-- ADDRESS -->
 
                     <div class="form-group">
+
 
                         <label>
                             Complete Address *
@@ -1940,13 +2025,14 @@ input[type="file"] {
                             ?? ""
                         ) ?></textarea>
 
-                    </div>
 
+                    </div>
 
 
                     <!-- BARANGAY -->
 
                     <div class="form-group">
+
 
                         <label>
                             Barangay *
@@ -1959,41 +2045,43 @@ input[type="file"] {
                             id="barangay"
                             required
 
-                            placeholder="Example: Barangay 7"
+                            placeholder="Example: Barangay 176"
 
                             oninput="detectCaloocanArea()"
 
-                            value="<?=
-                                htmlspecialchars(
-                                    $employer[
-                                        "barangay"
-                                    ]
-                                    ?? ""
-                                )
-                            ?>"
+                            value="<?= htmlspecialchars(
+                                $employer[
+                                    "barangay"
+                                ]
+                                ?? ""
+                            ) ?>"
                         >
 
 
-                        <!-- LIVE AREA RESULT -->
+                        <!-- NORTH/SOUTH RESULT -->
 
                         <div
                             id="areaResult"
                             class="location-status"
+
                             style="
                                 display:none;
                                 margin-top:10px;
                             "
                         ></div>
 
+
                     </div>
 
 
-
-                    <!-- CURRENT LOCATION BUTTON -->
+                    <!-- =================================================
+                         CURRENT LOCATION BUTTON
+                    ================================================== -->
 
                     <button
                         type="button"
                         class="btn"
+                        id="locationButton"
                         onclick="getCurrentLocation()"
                     >
 
@@ -2002,8 +2090,9 @@ input[type="file"] {
                     </button>
 
 
-
-                    <!-- LOCATION MESSAGE -->
+                    <!-- =================================================
+                         LOCATION MESSAGE
+                    ================================================== -->
 
                     <div
                         id="locationStatus"
@@ -2011,86 +2100,48 @@ input[type="file"] {
                     >
 
                         Click "Use My Current Location"
-                        to detect your current
-                        location.
+                        to save your exact business location.
 
                     </div>
 
 
+                    <!-- =================================================
+                         HIDDEN LATITUDE
+                    ================================================== -->
 
-                    <!-- LATITUDE / LONGITUDE -->
+                    <input
+                        type="hidden"
+                        name="latitude"
+                        id="latitude"
 
-                    <div class="coordinates">
-
-
-                        <div class="form-group">
-
-                            <label>
-                                Latitude
-                            </label>
-
-
-                            <input
-                                type="text"
-                                name="latitude"
-                                id="latitude"
-                                
-
-                                value="<?=
-                                    htmlspecialchars(
-                                        $employer[
-                                            "latitude"
-                                        ]
-                                        ?? ""
-                                    )
-                                ?>"
-                            >
-
-                        </div>
+                        value="<?= htmlspecialchars(
+                            $employer[
+                                "latitude"
+                            ]
+                            ?? ""
+                        ) ?>"
+                    >
 
 
+                    <!-- =================================================
+                         HIDDEN LONGITUDE
+                    ================================================== -->
 
-                        <div class="form-group">
+                    <input
+                        type="hidden"
+                        name="longitude"
+                        id="longitude"
 
-                            <label>
-                                Longitude
-                            </label>
-
-
-                            <input
-                                type="text"
-                                name="longitude"
-                                id="longitude"
-                                
-
-                                value="<?=
-                                    htmlspecialchars(
-                                        $employer[
-                                            "longitude"
-                                        ]
-                                        ?? ""
-                                    )
-                                ?>"
-                            >
-
-                        </div>
-
-
-                    </div>
-
-
-
-                    <!-- GOOGLE MAP -->
-
-                    <iframe
-                        id="map"
-                        loading="lazy"
-                        allowfullscreen
-                    ></iframe>
+                        value="<?= htmlspecialchars(
+                            $employer[
+                                "longitude"
+                            ]
+                            ?? ""
+                        ) ?>"
+                    >
 
 
                 </div>
-
 
 
                 <!-- =================================================
@@ -2098,6 +2149,7 @@ input[type="file"] {
                 ================================================== -->
 
                 <div class="card">
+
 
                     <h2>
                         Verification Documents
@@ -2113,10 +2165,12 @@ input[type="file"] {
                     </p>
 
 
-
-                    <!-- GOVERNMENT ID -->
+                    <!-- =================================================
+                         GOVERNMENT ID
+                    ================================================== -->
 
                     <div class="document">
+
 
                         <h3>
                             Government ID
@@ -2125,8 +2179,9 @@ input[type="file"] {
 
                         <p>
 
-                            Upload a valid government-issued
-                            ID showing your Caloocan address.
+                            Upload a valid
+                            government-issued ID showing
+                            your Caloocan address.
 
                         </p>
 
@@ -2147,6 +2202,7 @@ input[type="file"] {
                             )
                         ): ?>
 
+
                             <div class="uploaded">
 
                                 ✓ Government ID
@@ -2154,15 +2210,19 @@ input[type="file"] {
 
                             </div>
 
+
                         <?php endif; ?>
+
 
                     </div>
 
 
-
-                    <!-- BARANGAY CERTIFICATE -->
+                    <!-- =================================================
+                         BARANGAY CERTIFICATE
+                    ================================================== -->
 
                     <div class="document">
+
 
                         <h3>
                             Barangay Certificate
@@ -2171,9 +2231,9 @@ input[type="file"] {
 
                         <p>
 
-                            Upload a Barangay
-                            Certificate as proof
-                            of your Caloocan address.
+                            Upload a Barangay Certificate
+                            as proof of your
+                            Caloocan address.
 
                         </p>
 
@@ -2194,6 +2254,7 @@ input[type="file"] {
                             )
                         ): ?>
 
+
                             <div class="uploaded">
 
                                 ✓ Barangay Certificate
@@ -2201,15 +2262,19 @@ input[type="file"] {
 
                             </div>
 
+
                         <?php endif; ?>
+
 
                     </div>
 
 
-
-                    <!-- BUSINESS PERMIT -->
+                    <!-- =================================================
+                         BUSINESS PERMIT
+                    ================================================== -->
 
                     <div class="document">
+
 
                         <h3>
                             Business Permit
@@ -2240,6 +2305,7 @@ input[type="file"] {
                             )
                         ): ?>
 
+
                             <div class="uploaded">
 
                                 ✓ Business Permit
@@ -2247,26 +2313,30 @@ input[type="file"] {
 
                             </div>
 
+
                         <?php endif; ?>
 
-                    </div>
 
+                    </div>
 
 
                     <div class="verification-note">
 
                         Accepted formats:
                         JPG, PNG and PDF.
-                        Maximum file size is
+
+                        <br>
+
+                        Maximum file size:
                         5MB per document.
 
                     </div>
+
 
                 </div>
 
 
             </div>
-
 
 
             <!-- =================================================
@@ -2282,12 +2352,16 @@ input[type="file"] {
 
                 <div class="card">
 
+
                     <h2>
                         Location Summary
                     </h2>
 
 
+                    <!-- BARANGAY -->
+
                     <div class="status-item">
+
 
                         <div class="status-item-label">
                             Barangay
@@ -2305,11 +2379,14 @@ input[type="file"] {
 
                         </strong>
 
+
                     </div>
 
 
+                    <!-- AREA -->
 
                     <div class="status-item">
+
 
                         <div class="status-item-label">
                             Caloocan Area
@@ -2325,10 +2402,12 @@ input[type="file"] {
                         ): ?>
 
 
-                            <span class="
-                                status
-                                approved-status
-                            ">
+                            <span
+                                class="
+                                    status
+                                    approved-status
+                                "
+                            >
 
                                 <?= strtoupper(
                                     htmlspecialchars(
@@ -2346,10 +2425,12 @@ input[type="file"] {
                         <?php else: ?>
 
 
-                            <span class="
-                                status
-                                unverified-status
-                            ">
+                            <span
+                                class="
+                                    status
+                                    unverified-status
+                                "
+                            >
 
                                 Not Detected
 
@@ -2358,10 +2439,69 @@ input[type="file"] {
 
                         <?php endif; ?>
 
+
                     </div>
 
-                </div>
 
+                    <!-- COORDINATE STATUS -->
+
+                    <div class="status-item">
+
+
+                        <div class="status-item-label">
+                            Exact Location
+                        </div>
+
+
+                        <?php if (
+                            !empty(
+                                $employer[
+                                    "latitude"
+                                ]
+                            )
+                            &&
+                            !empty(
+                                $employer[
+                                    "longitude"
+                                ]
+                            )
+                        ): ?>
+
+
+                            <span
+                                class="
+                                    status
+                                    approved-status
+                                "
+                            >
+
+                                Location Saved
+
+                            </span>
+
+
+                        <?php else: ?>
+
+
+                            <span
+                                class="
+                                    status
+                                    unverified-status
+                                "
+                            >
+
+                                Not Set
+
+                            </span>
+
+
+                        <?php endif; ?>
+
+
+                    </div>
+
+
+                </div>
 
 
                 <!-- =================================================
@@ -2369,6 +2509,7 @@ input[type="file"] {
                 ================================================== -->
 
                 <div class="card">
+
 
                     <h2>
                         Verification Status
@@ -2407,22 +2548,24 @@ input[type="file"] {
                     ?>
 
 
-
                     <!-- DOCUMENT STATUS -->
 
                     <div class="status-item">
+
 
                         <div class="status-item-label">
                             Documents
                         </div>
 
 
-                        <span class="
-                            status
-                            <?= verificationStatusClass(
-                                $documentStatus
-                            ) ?>
-                        ">
+                        <span
+                            class="
+                                status
+                                <?= verificationStatusClass(
+                                    $documentStatus
+                                ) ?>
+                            "
+                        >
 
                             <?= htmlspecialchars(
                                 verificationStatusLabel(
@@ -2432,25 +2575,28 @@ input[type="file"] {
 
                         </span>
 
-                    </div>
 
+                    </div>
 
 
                     <!-- LOCATION STATUS -->
 
                     <div class="status-item">
 
+
                         <div class="status-item-label">
                             Location
                         </div>
 
 
-                        <span class="
-                            status
-                            <?= verificationStatusClass(
-                                $locationStatus
-                            ) ?>
-                        ">
+                        <span
+                            class="
+                                status
+                                <?= verificationStatusClass(
+                                    $locationStatus
+                                ) ?>
+                            "
+                        >
 
                             <?= htmlspecialchars(
                                 verificationStatusLabel(
@@ -2460,25 +2606,28 @@ input[type="file"] {
 
                         </span>
 
+
                     </div>
 
 
-
-                    <!-- ADMIN -->
+                    <!-- ADMIN STATUS -->
 
                     <div class="status-item">
+
 
                         <div class="status-item-label">
                             Admin Approval
                         </div>
 
 
-                        <span class="
-                            status
-                            <?= verificationStatusClass(
-                                $adminStatus
-                            ) ?>
-                        ">
+                        <span
+                            class="
+                                status
+                                <?= verificationStatusClass(
+                                    $adminStatus
+                                ) ?>
+                            "
+                        >
 
                             <?= htmlspecialchars(
                                 verificationStatusLabel(
@@ -2488,25 +2637,28 @@ input[type="file"] {
 
                         </span>
 
+
                     </div>
 
 
-
-                    <!-- EMPLOYER ACCOUNT -->
+                    <!-- ACCOUNT -->
 
                     <div class="status-item">
+
 
                         <div class="status-item-label">
                             Employer Account
                         </div>
 
 
-                        <span class="
-                            status
-                            <?= verificationStatusClass(
-                                $accountStatus
-                            ) ?>
-                        ">
+                        <span
+                            class="
+                                status
+                                <?= verificationStatusClass(
+                                    $accountStatus
+                                ) ?>
+                            "
+                        >
 
                             <?= htmlspecialchars(
                                 verificationStatusLabel(
@@ -2516,11 +2668,11 @@ input[type="file"] {
 
                         </span>
 
+
                     </div>
 
 
                 </div>
-
 
 
                 <!-- =================================================
@@ -2528,6 +2680,7 @@ input[type="file"] {
                 ================================================== -->
 
                 <div class="card">
+
 
                     <h2>
                         Verification Process
@@ -2569,8 +2722,8 @@ input[type="file"] {
 
                         <p>
 
-                            Your location must be
-                            verified as being inside
+                            Your business location
+                            must be inside
                             Caloocan City.
 
                         </p>
@@ -2590,18 +2743,18 @@ input[type="file"] {
 
                         <p>
 
-                            An administrator will
-                            review the submitted
-                            information before your
-                            account is fully verified.
+                            An administrator will review
+                            the submitted information
+                            before your account is
+                            fully verified.
 
                         </p>
 
 
                     </div>
 
-                </div>
 
+                </div>
 
 
                 <!-- =================================================
@@ -2610,6 +2763,7 @@ input[type="file"] {
 
                 <div class="card">
 
+
                     <h2>
                         Save Profile
                     </h2>
@@ -2617,8 +2771,9 @@ input[type="file"] {
 
                     <p class="card-description">
 
-                        Save your profile and submit
-                        the information for verification.
+                        Save your profile and
+                        submit the information
+                        for verification.
 
                     </p>
 
@@ -2631,6 +2786,7 @@ input[type="file"] {
                         Save & Submit
 
                     </button>
+
 
                 </div>
 
@@ -2645,7 +2801,6 @@ input[type="file"] {
 
 
 </div>
-
 
 
 <script>
@@ -2672,7 +2827,10 @@ function detectCaloocanArea()
         );
 
 
-    if (!barangay || !result) {
+    if (
+        !barangay ||
+        !result
+    ) {
 
         return;
     }
@@ -2684,24 +2842,27 @@ function detectCaloocanArea()
 
     /*
     |--------------------------------------------------------------------------
-    | Extract first number
+    | GET BARANGAY NUMBER
     |--------------------------------------------------------------------------
     |
-    | Examples:
+    | Examples accepted:
     |
     | Barangay 7
+    | Brgy 176
     | Brgy. 176
-    | 188
+    | 176
     |
     */
 
     const match =
-        value.match(/\d+/);
+        value.match(
+            /\d+/
+        );
 
 
     /*
     |--------------------------------------------------------------------------
-    | No number found
+    | NO NUMBER
     |--------------------------------------------------------------------------
     */
 
@@ -2827,63 +2988,18 @@ function detectCaloocanArea()
     result.innerHTML =
         "⚠ Please enter a valid Caloocan "
         + "barangay number from 1 to 188.";
-
 }
-
-
-
-/*
-|--------------------------------------------------------------------------
-| SHOW SAVED AREA ON PAGE LOAD
-|--------------------------------------------------------------------------
-*/
-
-detectCaloocanArea();
-
-
-
-/*
-|--------------------------------------------------------------------------
-| SHOW SAVED LOCATION
-|--------------------------------------------------------------------------
-*/
-
-const savedLatitude =
-    document.getElementById(
-        "latitude"
-    ).value;
-
-
-const savedLongitude =
-    document.getElementById(
-        "longitude"
-    ).value;
-
-
-if (
-    savedLatitude !== "" &&
-    savedLongitude !== ""
-) {
-
-    showMap(
-        savedLatitude,
-        savedLongitude
-    );
-
-
-    document.getElementById(
-        "locationStatus"
-    ).innerHTML =
-        "✓ Saved business location.";
-
-}
-
 
 
 /*
 |--------------------------------------------------------------------------
 | GET CURRENT LOCATION
 |--------------------------------------------------------------------------
+|
+| No map is displayed.
+|
+| The GPS coordinates are saved inside hidden form fields.
+|
 */
 
 function getCurrentLocation()
@@ -2895,10 +3011,36 @@ function getCurrentLocation()
         );
 
 
-    if (!navigator.geolocation) {
+    const button =
+        document.getElementById(
+            "locationButton"
+        );
+
+
+    const latitudeInput =
+        document.getElementById(
+            "latitude"
+        );
+
+
+    const longitudeInput =
+        document.getElementById(
+            "longitude"
+        );
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | GEOLOCATION SUPPORT
+    |--------------------------------------------------------------------------
+    */
+
+    if (
+        !navigator.geolocation
+    ) {
 
         status.innerHTML =
-            "Geolocation is not supported "
+            "⚠ Geolocation is not supported "
             + "by your browser.";
 
 
@@ -2906,9 +3048,29 @@ function getCurrentLocation()
     }
 
 
-    status.innerHTML =
-        "Getting your current location...";
+    /*
+    |--------------------------------------------------------------------------
+    | LOADING
+    |--------------------------------------------------------------------------
+    */
 
+    button.disabled =
+        true;
+
+
+    button.innerHTML =
+        "Getting Location...";
+
+
+    status.innerHTML =
+        "Detecting your exact business location...";
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | GET CURRENT POSITION
+    |--------------------------------------------------------------------------
+    */
 
     navigator.geolocation.getCurrentPosition(
 
@@ -2930,27 +3092,37 @@ function getCurrentLocation()
                 position.coords.longitude;
 
 
-            document.getElementById(
-                "latitude"
-            ).value =
-                latitude;
+            /*
+            |--------------------------------------------------------------------------
+            | SAVE TO HIDDEN INPUTS
+            |--------------------------------------------------------------------------
+            */
+
+            latitudeInput.value =
+                latitude.toFixed(8);
 
 
-            document.getElementById(
-                "longitude"
-            ).value =
-                longitude;
+            longitudeInput.value =
+                longitude.toFixed(8);
 
+
+            /*
+            |--------------------------------------------------------------------------
+            | MESSAGE
+            |--------------------------------------------------------------------------
+            */
 
             status.innerHTML =
-                "✓ Current location "
-                + "detected successfully.";
+                "✓ Business location detected successfully. "
+                + "Click Save & Submit to save your location.";
 
 
-            showMap(
-                latitude,
-                longitude
-            );
+            button.disabled =
+                false;
+
+
+            button.innerHTML =
+                "Update Current Location";
 
         },
 
@@ -2964,41 +3136,59 @@ function getCurrentLocation()
         function(error)
         {
 
-            switch (error.code) {
+            button.disabled =
+                false;
+
+
+            button.innerHTML =
+                "Use My Current Location";
+
+
+            switch (
+                error.code
+            ) {
 
 
                 case error.PERMISSION_DENIED:
 
+
                     status.innerHTML =
-                        "Location permission was denied. "
-                        + "Please allow location access.";
+                        "⚠ Location permission was denied. "
+                        + "Please allow location access "
+                        + "in your browser.";
+
 
                     break;
 
 
                 case error.POSITION_UNAVAILABLE:
 
+
                     status.innerHTML =
-                        "Your current location "
+                        "⚠ Your current location "
                         + "is unavailable.";
+
 
                     break;
 
 
                 case error.TIMEOUT:
 
+
                     status.innerHTML =
-                        "Location request timed out. "
+                        "⚠ Location request timed out. "
                         + "Please try again.";
+
 
                     break;
 
 
                 default:
 
+
                     status.innerHTML =
-                        "Unable to get your "
-                        + "current location.";
+                        "⚠ Unable to detect "
+                        + "your current location.";
 
             }
 
@@ -3016,8 +3206,10 @@ function getCurrentLocation()
             enableHighAccuracy:
                 true,
 
+
             timeout:
                 15000,
+
 
             maximumAge:
                 0
@@ -3029,33 +3221,71 @@ function getCurrentLocation()
 }
 
 
-
 /*
 |--------------------------------------------------------------------------
-| SHOW GOOGLE MAP
+| PAGE LOAD
 |--------------------------------------------------------------------------
 */
 
-function showMap(
-    latitude,
-    longitude
-)
-{
+document.addEventListener(
+    "DOMContentLoaded",
+    function()
+    {
 
-    const map =
-        document.getElementById(
-            "map"
-        );
+        /*
+        |--------------------------------------------------------------------------
+        | SHOW SAVED NORTH / SOUTH
+        |--------------------------------------------------------------------------
+        */
+
+        detectCaloocanArea();
 
 
-    map.src =
-        "https://www.google.com/maps?q="
-        + encodeURIComponent(latitude)
-        + ","
-        + encodeURIComponent(longitude)
-        + "&z=17&output=embed";
+        /*
+        |--------------------------------------------------------------------------
+        | CHECK SAVED LOCATION
+        |--------------------------------------------------------------------------
+        */
 
-}
+        const savedLatitude =
+            document.getElementById(
+                "latitude"
+            ).value;
+
+
+        const savedLongitude =
+            document.getElementById(
+                "longitude"
+            ).value;
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | LOCATION ALREADY SAVED
+        |--------------------------------------------------------------------------
+        */
+
+        if (
+            savedLatitude !== "" &&
+            savedLongitude !== ""
+        ) {
+
+            document.getElementById(
+                "locationStatus"
+            ).innerHTML =
+                "✓ Exact business location "
+                + "has already been saved.";
+
+
+            document.getElementById(
+                "locationButton"
+            ).innerHTML =
+                "Update Current Location";
+
+        }
+
+    }
+);
 
 
 </script>

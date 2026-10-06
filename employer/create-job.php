@@ -15,12 +15,13 @@ if (
     !isset($_SESSION["user_id"]) ||
     $_SESSION["role"] !== "employer"
 ) {
+
     header("Location: ../login.php");
     exit;
 }
 
 
-$userId = $_SESSION["user_id"];
+$userId = (int) $_SESSION["user_id"];
 
 $error = "";
 
@@ -29,21 +30,12 @@ $error = "";
 |--------------------------------------------------------------------------
 | GET EMPLOYER
 |--------------------------------------------------------------------------
-|
-| Kukunin natin:
-| - employer id
-| - company
-| - verified address
-| - barangay
-| - north/south
-| - latitude
-| - longitude
-| - verification status
-|
 */
 
 $stmt = $pdo->prepare("
+
     SELECT
+
         id,
         company_name,
         address,
@@ -52,9 +44,13 @@ $stmt = $pdo->prepare("
         latitude,
         longitude,
         verification_status
+
     FROM employers
+
     WHERE user_id = ?
+
     LIMIT 1
+
 ");
 
 
@@ -97,7 +93,7 @@ if (
 
 
 $employerId =
-    $employer["id"];
+    (int) $employer["id"];
 
 
 /*
@@ -107,20 +103,30 @@ $employerId =
 */
 
 $verifiedAddress =
-    $employer["address"]
-    ?? "";
+    trim(
+        $employer["address"]
+        ?? ""
+    );
+
 
 $verifiedBarangay =
-    $employer["barangay"]
-    ?? "";
+    trim(
+        $employer["barangay"]
+        ?? ""
+    );
+
 
 $verifiedArea =
-    $employer["caloocan_area"]
-    ?? "";
+    trim(
+        $employer["caloocan_area"]
+        ?? ""
+    );
+
 
 $verifiedLatitude =
     $employer["latitude"]
     ?? "";
+
 
 $verifiedLongitude =
     $employer["longitude"]
@@ -176,7 +182,10 @@ $requirements = "";
 |--------------------------------------------------------------------------
 */
 
-if ($_SERVER["REQUEST_METHOD"] === "POST") {
+if (
+    $_SERVER["REQUEST_METHOD"]
+    === "POST"
+) {
 
     try {
 
@@ -241,28 +250,28 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         | SERVER-SIDE LOCATION
         |--------------------------------------------------------------------------
         |
-        | IMPORTANT:
+        | Hindi galing sa form ang location.
         |
-        | Hindi natin kukunin ang address galing sa hidden input.
-        |
-        | Gagamitin natin mismo ang nasa employers table.
-        |
-        | Para hindi kayang baguhin ng employer gamit
-        | browser developer tools.
+        | Direkta itong kinukuha sa verified employer profile
+        | para hindi mabago gamit ang browser developer tools.
         |
         */
 
         $jobAddress =
             $verifiedAddress;
 
+
         $jobBarangay =
             $verifiedBarangay;
+
 
         $jobArea =
             $verifiedArea;
 
+
         $jobLatitude =
             $verifiedLatitude;
+
 
         $jobLongitude =
             $verifiedLongitude;
@@ -272,29 +281,26 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         |--------------------------------------------------------------------------
         | LOCATION DISPLAY
         |--------------------------------------------------------------------------
-        |
-        | Existing jobs.php mo gumagamit ng:
-        |
-        | j.location
-        |
-        | Kaya ise-save din natin ang readable location.
-        |
         */
 
         $location =
             $jobBarangay
             . ", "
-            . strtoupper($jobArea)
+            . strtoupper(
+                $jobArea
+            )
             . " Caloocan";
 
 
         /*
         |--------------------------------------------------------------------------
-        | VALIDATION
+        | JOB TITLE
         |--------------------------------------------------------------------------
         */
 
-        if ($jobTitle === "") {
+        if (
+            $jobTitle === ""
+        ) {
 
             throw new Exception(
                 "Job title is required."
@@ -302,7 +308,15 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
 
 
-        if ($jobDescription === "") {
+        /*
+        |--------------------------------------------------------------------------
+        | JOB DESCRIPTION
+        |--------------------------------------------------------------------------
+        */
+
+        if (
+            $jobDescription === ""
+        ) {
 
             throw new Exception(
                 "Job description is required."
@@ -310,12 +324,24 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
 
 
+        /*
+        |--------------------------------------------------------------------------
+        | EMPLOYMENT TYPE
+        |--------------------------------------------------------------------------
+        */
+
         $allowedEmploymentTypes = [
+
             "Full-time",
+
             "Part-time",
+
             "Contract",
+
             "Temporary",
+
             "Internship"
+
         ];
 
 
@@ -341,7 +367,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         if (
             $salaryMin !== "" &&
-            !is_numeric($salaryMin)
+            !is_numeric(
+                $salaryMin
+            )
         ) {
 
             throw new Exception(
@@ -352,7 +380,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         if (
             $salaryMax !== "" &&
-            !is_numeric($salaryMax)
+            !is_numeric(
+                $salaryMax
+            )
         ) {
 
             throw new Exception(
@@ -376,19 +406,19 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         /*
         |--------------------------------------------------------------------------
-        | EMPTY SALARY = NULL
+        | SALARY NULL VALUES
         |--------------------------------------------------------------------------
         */
 
         $salaryMinValue =
             $salaryMin !== ""
-            ? $salaryMin
+            ? (float) $salaryMin
             : null;
 
 
         $salaryMaxValue =
             $salaryMax !== ""
-            ? $salaryMax
+            ? (float) $salaryMax
             : null;
 
 
@@ -398,7 +428,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         |--------------------------------------------------------------------------
         */
 
-        if ($applicationDeadline === "") {
+        if (
+            $applicationDeadline === ""
+        ) {
 
             throw new Exception(
                 "Application deadline is required."
@@ -421,7 +453,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         if (
             strtotime(
                 $applicationDeadline
-            ) <
+            )
+            <
             strtotime(
                 date("Y-m-d")
             )
@@ -435,72 +468,113 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         /*
         |--------------------------------------------------------------------------
+        | LOCATION VALIDATION
+        |--------------------------------------------------------------------------
+        */
+
+        if (
+            $jobAddress === "" ||
+            $jobBarangay === "" ||
+            $jobArea === ""
+        ) {
+
+            throw new Exception(
+                "Your verified employer location is incomplete."
+            );
+        }
+
+
+        if (
+            !is_numeric(
+                $jobLatitude
+            ) ||
+            !is_numeric(
+                $jobLongitude
+            )
+        ) {
+
+            throw new Exception(
+                "Your verified employer coordinates are invalid."
+            );
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
         | INSERT JOB
         |--------------------------------------------------------------------------
         |
-        | New job starts as PENDING.
+        | New job will start as PENDING.
         |
-        | Admin still needs to approve the job posting.
+        | Admin must approve the job first.
         |
         */
 
-        $stmt = $pdo->prepare("
-            INSERT INTO jobs (
+        $stmt =
+            $pdo->prepare("
 
-                employer_id,
+                INSERT INTO jobs
+                (
 
-                job_title,
+                    employer_id,
 
-                job_description,
+                    job_title,
 
-                requirements,
+                    job_description,
 
-                location,
+                    requirements,
 
-                address,
+                    location,
 
-                barangay,
+                    address,
 
-                caloocan_area,
+                    barangay,
 
-                latitude,
+                    caloocan_area,
 
-                longtitude,
+                    latitude,
 
-                employment_type,
+                    longtitude,
 
-                salary_min,
+                    employment_type,
 
-                salary_max,
+                    salary_min,
 
-                application_deadline,
+                    salary_max,
 
-                status,
+                    application_deadline,
 
-                created_at
+                    status,
 
-            )
-            VALUES (
+                    created_at
 
-                ?,
-                ?,
-                ?,
-                ?,
-                ?,
-                ?,
-                ?,
-                ?,
-                ?,
-                ?,
-                ?,
-                ?,
-                ?,
-                ?,
-                'pending',
-                NOW()
+                )
 
-            )
-        ");
+                VALUES
+                (
+
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+
+                    'pending',
+
+                    NOW()
+
+                )
+
+            ");
 
 
         $stmt->execute([
@@ -549,7 +623,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         exit;
 
 
-    } catch (Exception $e) {
+    } catch (
+        Exception $e
+    ) {
 
         $error =
             $e->getMessage();
@@ -558,10 +634,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
 ?>
 
-
 <!DOCTYPE html>
 
 <html lang="en">
+
 
 <head>
 
@@ -571,6 +647,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     name="viewport"
     content="width=device-width, initial-scale=1.0"
 >
+
 
 <title>
     Post a Job - Caloocan Job Portal
@@ -602,6 +679,7 @@ body {
 
     font-family:
         Arial,
+        Helvetica,
         sans-serif;
 
     background:
@@ -715,7 +793,7 @@ body {
         40px auto;
 
     padding:
-        0 20px;
+        0 20px 50px;
 }
 
 
@@ -768,7 +846,12 @@ body {
 
     box-shadow:
         0 2px 10px
-        rgba(0,0,0,0.05);
+        rgba(
+            0,
+            0,
+            0,
+            0.05
+        );
 
     margin-bottom:
         20px;
@@ -867,6 +950,7 @@ textarea {
 
     font-family:
         Arial,
+        Helvetica,
         sans-serif;
 
     font-size:
@@ -889,7 +973,12 @@ textarea:focus {
 
     box-shadow:
         0 0 0 2px
-        rgba(37,99,235,0.08);
+        rgba(
+            37,
+            99,
+            235,
+            0.08
+        );
 }
 
 
@@ -1204,7 +1293,7 @@ textarea {
         1.6;
 
     margin-top:
-        10px;
+        15px;
 }
 
 
@@ -1214,7 +1303,9 @@ textarea {
 |--------------------------------------------------------------------------
 */
 
-@media (max-width: 700px) {
+@media (
+    max-width: 700px
+) {
 
     .form-grid {
 
@@ -1268,10 +1359,10 @@ textarea {
         justify-content:
             flex-start;
     }
-
 }
 
 </style>
+
 
 </head>
 
@@ -1287,7 +1378,9 @@ textarea {
 
 
     <div class="logo">
+
         JobPortal
+
     </div>
 
 
@@ -1295,17 +1388,23 @@ textarea {
 
 
         <a href="../index.php">
+
             Home
+
         </a>
 
 
         <a href="dashboard.php">
+
             Dashboard
+
         </a>
 
 
         <a href="profile.php">
+
             Profile
+
         </a>
 
 
@@ -1313,12 +1412,16 @@ textarea {
             href="jobs.php"
             class="active"
         >
+
             My Jobs
+
         </a>
 
 
         <a href="applicants.php">
+
             Applicants
+
         </a>
 
 
@@ -1326,15 +1429,21 @@ textarea {
             href="../logout.php"
             class="logout"
         >
+
             Logout
+
         </a>
 
 
     </div>
 
+
 </nav>
 
 
+<!-- =========================================================
+     MAIN
+========================================================= -->
 
 <div class="container">
 
@@ -1345,8 +1454,11 @@ textarea {
 
     <div class="page-header">
 
+
         <h1>
+
             Post a Job
+
         </h1>
 
 
@@ -1366,8 +1478,8 @@ textarea {
 
         </p>
 
-    </div>
 
+    </div>
 
 
     <!-- =====================================================
@@ -1389,7 +1501,6 @@ textarea {
     <?php endif; ?>
 
 
-
     <form method="POST">
 
 
@@ -1401,17 +1512,18 @@ textarea {
 
 
             <h2>
+
                 Job Details
+
             </h2>
 
 
             <p class="card-description">
 
-                Enter the information about
-                the job opening.
+                Enter the information
+                about the job opening.
 
             </p>
-
 
 
             <div class="form-grid">
@@ -1421,8 +1533,11 @@ textarea {
 
                 <div class="form-group full">
 
+
                     <label>
+
                         Job Title *
+
                     </label>
 
 
@@ -1438,16 +1553,19 @@ textarea {
                         ) ?>"
                     >
 
-                </div>
 
+                </div>
 
 
                 <!-- EMPLOYMENT TYPE -->
 
                 <div class="form-group">
 
+
                     <label>
+
                         Employment Type *
+
                     </label>
 
 
@@ -1456,8 +1574,11 @@ textarea {
                         required
                     >
 
+
                         <option value="">
+
                             Select employment type
+
                         </option>
 
 
@@ -1470,7 +1591,9 @@ textarea {
                                 : ""
                             ?>
                         >
+
                             Full-time
+
                         </option>
 
 
@@ -1483,7 +1606,9 @@ textarea {
                                 : ""
                             ?>
                         >
+
                             Part-time
+
                         </option>
 
 
@@ -1496,7 +1621,9 @@ textarea {
                                 : ""
                             ?>
                         >
+
                             Contract
+
                         </option>
 
 
@@ -1509,7 +1636,9 @@ textarea {
                                 : ""
                             ?>
                         >
+
                             Temporary
+
                         </option>
 
 
@@ -1522,21 +1651,27 @@ textarea {
                                 : ""
                             ?>
                         >
+
                             Internship
+
                         </option>
+
 
                     </select>
 
-                </div>
 
+                </div>
 
 
                 <!-- APPLICATION DEADLINE -->
 
                 <div class="form-group">
 
+
                     <label>
+
                         Application Deadline *
+
                     </label>
 
 
@@ -1545,23 +1680,28 @@ textarea {
                         name="application_deadline"
                         required
 
-                        min="<?= date("Y-m-d") ?>"
+                        min="<?= date(
+                            "Y-m-d"
+                        ) ?>"
 
                         value="<?= htmlspecialchars(
                             $applicationDeadline
                         ) ?>"
                     >
 
-                </div>
 
+                </div>
 
 
                 <!-- SALARY MIN -->
 
                 <div class="form-group">
 
+
                     <label>
+
                         Minimum Salary
+
                     </label>
 
 
@@ -1579,16 +1719,19 @@ textarea {
                         ) ?>"
                     >
 
-                </div>
 
+                </div>
 
 
                 <!-- SALARY MAX -->
 
                 <div class="form-group">
 
+
                     <label>
+
                         Maximum Salary
+
                     </label>
 
 
@@ -1606,16 +1749,19 @@ textarea {
                         ) ?>"
                     >
 
-                </div>
 
+                </div>
 
 
                 <!-- DESCRIPTION -->
 
                 <div class="form-group full">
 
+
                     <label>
+
                         Job Description *
+
                     </label>
 
 
@@ -1627,16 +1773,19 @@ textarea {
                         $jobDescription
                     ) ?></textarea>
 
-                </div>
 
+                </div>
 
 
                 <!-- REQUIREMENTS -->
 
                 <div class="form-group full">
 
+
                     <label>
+
                         Requirements
+
                     </label>
 
 
@@ -1647,6 +1796,7 @@ textarea {
                         $requirements
                     ) ?></textarea>
 
+
                 </div>
 
 
@@ -1654,7 +1804,6 @@ textarea {
 
 
         </div>
-
 
 
         <!-- =================================================
@@ -1665,7 +1814,9 @@ textarea {
 
 
             <h2>
+
                 Job Location
+
             </h2>
 
 
@@ -1678,12 +1829,15 @@ textarea {
             </p>
 
 
+            <!-- VERIFIED MESSAGE -->
 
             <div class="location-box">
 
 
                 <h3>
+
                     ✓ Verified Employer Location
+
                 </h3>
 
 
@@ -1707,13 +1861,17 @@ textarea {
             </div>
 
 
-
-            <!-- COMPLETE ADDRESS -->
+            <!-- =================================================
+                 COMPLETE ADDRESS
+            ================================================== -->
 
             <div class="form-group">
 
+
                 <label>
+
                     Complete Address
+
                 </label>
 
 
@@ -1724,9 +1882,13 @@ textarea {
                     $verifiedAddress
                 ) ?></textarea>
 
+
             </div>
 
 
+            <!-- =================================================
+                 BARANGAY + AREA
+            ================================================== -->
 
             <div class="form-grid">
 
@@ -1735,8 +1897,11 @@ textarea {
 
                 <div class="form-group">
 
+
                     <label>
+
                         Barangay
+
                     </label>
 
 
@@ -1750,20 +1915,24 @@ textarea {
                         ) ?>"
                     >
 
+
                 </div>
 
 
-
-                <!-- AREA -->
+                <!-- CALOOCAN AREA -->
 
                 <div class="form-group">
 
+
                     <label>
+
                         Caloocan Area
+
                     </label>
 
 
                     <div>
+
 
                         <span
                             class="
@@ -1787,53 +1956,9 @@ textarea {
 
                         </span>
 
+
                     </div>
 
-                </div>
-
-
-
-                <!-- LATITUDE -->
-
-                <div class="form-group">
-
-                    <label>
-                        Latitude
-                    </label>
-
-
-                    <input
-                        type="text"
-                        class="readonly"
-                        readonly
-
-                        value="<?= htmlspecialchars(
-                            $verifiedLatitude
-                        ) ?>"
-                    >
-
-                </div>
-
-
-
-                <!-- LONGITUDE -->
-
-                <div class="form-group">
-
-                    <label>
-                        Longitude
-                    </label>
-
-
-                    <input
-                        type="text"
-                        class="readonly"
-                        readonly
-
-                        value="<?= htmlspecialchars(
-                            $verifiedLongitude
-                        ) ?>"
-                    >
 
                 </div>
 
@@ -1841,8 +1966,12 @@ textarea {
             </div>
 
 
+            <!-- =================================================
+                 MAP
 
-            <!-- MAP -->
+                 Coordinates are still used internally.
+                 Latitude / Longitude are no longer displayed.
+            ================================================== -->
 
             <iframe
                 id="map"
@@ -1856,29 +1985,37 @@ textarea {
                 loading="lazy"
 
                 allowfullscreen
+
+                referrerpolicy="no-referrer-when-downgrade"
             ></iframe>
 
 
+            <!-- NOTE -->
 
             <div class="note">
 
+
                 <strong>
+
                     Note:
+
                 </strong>
+
 
                 The job location is automatically
                 taken from your verified employer
                 profile.
 
+
                 If your business location changes,
                 update your Employer Profile and
                 submit it for verification again.
+
 
             </div>
 
 
         </div>
-
 
 
         <!-- =================================================
@@ -1898,7 +2035,9 @@ textarea {
                         btn-secondary
                     "
                 >
+
                     Cancel
+
                 </a>
 
 

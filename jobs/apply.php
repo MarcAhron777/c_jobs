@@ -1,4 +1,3 @@
-
 <?php
 
 session_start();
@@ -10,20 +9,22 @@ require_once "../services/LocationMatcher.php";
 
 /*
 |--------------------------------------------------------------------------
-| Applicant Only
+| APPLICANT ONLY
 |--------------------------------------------------------------------------
 */
 
 if (
-    !isset($_SESSION["user_id"])
-    || $_SESSION["role"] !== "applicant"
+    !isset($_SESSION["user_id"]) ||
+    $_SESSION["role"] !== "applicant"
 ) {
     header("Location: ../login.php");
     exit;
 }
 
 
-$userId = $_SESSION["user_id"];
+$userId =
+    (int) $_SESSION["user_id"];
+
 
 $jobId = isset($_GET["id"])
     ? (int) $_GET["id"]
@@ -41,7 +42,7 @@ $success = "";
 
 /*
 |--------------------------------------------------------------------------
-| Get Applicant
+| GET APPLICANT
 |--------------------------------------------------------------------------
 */
 
@@ -50,14 +51,22 @@ $stmt = $pdo->prepare("
         id,
         first_name,
         last_name
+
     FROM applicants
+
     WHERE user_id = ?
+
     LIMIT 1
 ");
 
-$stmt->execute([$userId]);
+$stmt->execute([
+    $userId
+]);
 
-$applicant = $stmt->fetch();
+$applicant =
+    $stmt->fetch(
+        PDO::FETCH_ASSOC
+    );
 
 
 if (!$applicant) {
@@ -65,20 +74,19 @@ if (!$applicant) {
 }
 
 
-$applicantId = $applicant["id"];
+$applicantId =
+    (int) $applicant["id"];
 
 
 /*
 |--------------------------------------------------------------------------
-| Get Job
-|--------------------------------------------------------------------------
-| IMPORTANT:
-| We use jobs.requirements for resume matching.
+| GET JOB
 |--------------------------------------------------------------------------
 */
 
 $stmt = $pdo->prepare("
     SELECT
+
         j.id,
         j.job_title,
         j.description,
@@ -94,16 +102,22 @@ $stmt = $pdo->prepare("
     INNER JOIN employers e
         ON j.employer_id = e.id
 
-    WHERE j.id = ?
-    AND j.status = 'approved'
-    AND LOWER(j.location) LIKE '%caloocan%'
+    WHERE
+        j.id = ?
+        AND j.status = 'approved'
+        AND LOWER(j.location) LIKE '%caloocan%'
 
     LIMIT 1
 ");
 
-$stmt->execute([$jobId]);
+$stmt->execute([
+    $jobId
+]);
 
-$job = $stmt->fetch();
+$job =
+    $stmt->fetch(
+        PDO::FETCH_ASSOC
+    );
 
 
 if (!$job) {
@@ -113,46 +127,59 @@ if (!$job) {
 
 /*
 |--------------------------------------------------------------------------
-| Get Requirements
+| GET REQUIREMENTS
 |--------------------------------------------------------------------------
 */
 
-$requirements = trim(
-    $job["requirements"] ?? ""
-);
+$requirements =
+    trim(
+        $job["requirements"]
+        ?? ""
+    );
 
 
 /*
 |--------------------------------------------------------------------------
-| Check Application Deadline
+| CHECK APPLICATION DEADLINE
 |--------------------------------------------------------------------------
 */
 
 if (
-    !empty($job["application_deadline"])
-    && strtotime($job["application_deadline"])
-        < strtotime(date("Y-m-d"))
+    !empty(
+        $job["application_deadline"]
+    )
+    &&
+    strtotime(
+        $job["application_deadline"]
+    )
+    <
+    strtotime(
+        date("Y-m-d")
+    )
 ) {
 
     die(
         "The application deadline for this job has passed."
     );
-
 }
 
 
 /*
 |--------------------------------------------------------------------------
-| Check Existing Application
+| CHECK EXISTING APPLICATION
 |--------------------------------------------------------------------------
 */
 
 $stmt = $pdo->prepare("
     SELECT
         id
+
     FROM applications
-    WHERE job_id = ?
-    AND applicant_id = ?
+
+    WHERE
+        job_id = ?
+        AND applicant_id = ?
+
     LIMIT 1
 ");
 
@@ -161,7 +188,10 @@ $stmt->execute([
     $applicantId
 ]);
 
-$existingApplication = $stmt->fetch();
+$existingApplication =
+    $stmt->fetch(
+        PDO::FETCH_ASSOC
+    );
 
 
 if ($existingApplication) {
@@ -177,78 +207,102 @@ if ($existingApplication) {
 
 /*
 |--------------------------------------------------------------------------
-| Get Applicant Resumes
+| GET APPLICANT RESUMES
 |--------------------------------------------------------------------------
 */
 
 $stmt = $pdo->prepare("
     SELECT
+
         id,
         file_name,
         uploaded_at,
         extracted_text
+
     FROM resumes
+
     WHERE applicant_id = ?
+
     ORDER BY uploaded_at DESC
 ");
 
-$stmt->execute([$applicantId]);
+$stmt->execute([
+    $applicantId
+]);
 
-$resumes = $stmt->fetchAll();
+$resumes =
+    $stmt->fetchAll(
+        PDO::FETCH_ASSOC
+    );
 
 
 /*
 |--------------------------------------------------------------------------
-| Submit Application
+| SUBMIT APPLICATION
 |--------------------------------------------------------------------------
 */
 
-if ($_SERVER["REQUEST_METHOD"] === "POST") {
+if (
+    $_SERVER["REQUEST_METHOD"]
+    === "POST"
+) {
 
-    $resumeId = isset($_POST["resume_id"])
+    $resumeId =
+        isset($_POST["resume_id"])
         ? (int) $_POST["resume_id"]
         : 0;
 
-    $coverLetter = trim(
-        $_POST["cover_letter"] ?? ""
-    );
+
+    $coverLetter =
+        trim(
+            $_POST["cover_letter"]
+            ?? ""
+        );
+
+
+    $resume = null;
 
 
     /*
     |--------------------------------------------------------------------------
-    | Validate Resume
+    | VALIDATE RESUME
     |--------------------------------------------------------------------------
     */
 
     if ($resumeId <= 0) {
 
-        $error = "Please select a resume.";
+        $error =
+            "Please select a resume.";
 
     } else {
 
-        /*
-        |--------------------------------------------------------------------------
-        | Make sure resume belongs to applicant
-        |--------------------------------------------------------------------------
-        */
-
         $stmt = $pdo->prepare("
             SELECT
+
                 id,
                 file_name,
                 extracted_text
+
             FROM resumes
-            WHERE id = ?
-            AND applicant_id = ?
+
+            WHERE
+                id = ?
+                AND applicant_id = ?
+
             LIMIT 1
         ");
+
 
         $stmt->execute([
             $resumeId,
             $applicantId
         ]);
 
-        $resume = $stmt->fetch();
+
+        $resume =
+            $stmt->fetch(
+                PDO::FETCH_ASSOC
+            );
 
 
         if (!$resume) {
@@ -259,38 +313,64 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         } elseif (
             empty(
                 trim(
-                    $resume["extracted_text"] ?? ""
+                    $resume[
+                        "extracted_text"
+                    ]
+                    ?? ""
                 )
             )
         ) {
 
             $error =
-                "The selected resume could not be processed. Please upload a readable PDF resume.";
-
+                "The selected resume could not be processed. "
+                . "Please upload a readable PDF resume.";
         }
-
     }
+
 
     /*
     |--------------------------------------------------------------------------
-    | Check Resume Location
+    | GET RESUME TEXT
     |--------------------------------------------------------------------------
     */
 
     if ($error === "") {
-        $resumeText = trim($resume['extracted_text'] ?? "");
 
-        if (!LocationMatcher::isCaloocan($resumeText)) {
-            $error = "You cannot apply for this Job because"
-            . "your resume location does not indicate "
-            . "Caloocan City.";
+        $resumeText =
+            trim(
+                $resume[
+                    "extracted_text"
+                ]
+                ?? ""
+            );
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | CHECK RESUME LOCATION
+    |--------------------------------------------------------------------------
+    */
+
+    if ($error === "") {
+
+        if (
+            !LocationMatcher::isCaloocan(
+                $resumeText
+            )
+        ) {
+
+            $error =
+                "You cannot apply for this job because "
+                . "your resume location does not indicate "
+                . "Caloocan City.";
         }
     }
 
 
     /*
     |--------------------------------------------------------------------------
-    | Calculate Resume Match
+    | CALCULATE RESUME MATCH
     |--------------------------------------------------------------------------
     */
 
@@ -298,20 +378,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         try {
 
-            /*
-            |--------------------------------------------------------------------------
-            | Get Extracted Resume Text
-            |--------------------------------------------------------------------------
-            */
-
-            $resumeText = trim(
-                $resume["extracted_text"] ?? ""
-            );
-
 
             /*
             |--------------------------------------------------------------------------
-            | Calculate Match
+            | MATCH REQUIREMENTS VS SKILLS SECTION ONLY
             |--------------------------------------------------------------------------
             */
 
@@ -323,13 +393,33 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                         $resumeText
                     );
 
-            } else {
 
                 /*
                 |--------------------------------------------------------------------------
-                | No Requirements
+                | CHECK THAT SKILLS SECTION WAS FOUND
                 |--------------------------------------------------------------------------
                 */
+
+                $resumeSkills =
+                    $matchResult[
+                        "resume_skills"
+                    ]
+                    ?? [];
+
+
+                if (
+                    count($resumeSkills) === 0
+                ) {
+
+                    throw new Exception(
+                        "Your resume does not contain a readable "
+                        . "\"SKILLS AND COMPETENCIES\" section. "
+                        . "Please use the provided resume template "
+                        . "or update your resume before applying."
+                    );
+                }
+
+            } else {
 
                 $matchResult = [
 
@@ -337,16 +427,70 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
                     "matched_skills" => [],
 
-                    "missing_skills" => []
+                    "missing_skills" => [],
+
+                    "resume_skills" => []
 
                 ];
-
             }
 
 
             /*
             |--------------------------------------------------------------------------
-            | Start Database Transaction
+            | PREPARE MATCH RESULT
+            |--------------------------------------------------------------------------
+            */
+
+            $matchScore =
+                (float) (
+                    $matchResult[
+                        "score"
+                    ]
+                    ?? 0
+                );
+
+
+            if ($matchScore < 0) {
+                $matchScore = 0;
+            }
+
+
+            if ($matchScore > 100) {
+                $matchScore = 100;
+            }
+
+
+            $matchedSkills =
+                $matchResult[
+                    "matched_skills"
+                ]
+                ?? [];
+
+
+            $missingSkills =
+                $matchResult[
+                    "missing_skills"
+                ]
+                ?? [];
+
+
+            $matchedSkillsText =
+                implode(
+                    ", ",
+                    $matchedSkills
+                );
+
+
+            $missingSkillsText =
+                implode(
+                    ", ",
+                    $missingSkills
+                );
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | START TRANSACTION
             |--------------------------------------------------------------------------
             */
 
@@ -355,7 +499,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
             /*
             |--------------------------------------------------------------------------
-            | Insert Application
+            | INSERT APPLICATION
             |--------------------------------------------------------------------------
             */
 
@@ -368,59 +512,46 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     cover_letter,
                     status
                 )
-                VALUES (?, ?, ?, ?, 'pending')
+
+                VALUES
+                (
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    'pending'
+                )
             ");
 
+
             $stmt->execute([
+
                 $jobId,
+
                 $applicantId,
+
                 $resumeId,
-                $coverLetter ?: null
+
+                $coverLetter !== ""
+                    ? $coverLetter
+                    : null
+
             ]);
 
 
             /*
             |--------------------------------------------------------------------------
-            | Get Application ID
+            | GET APPLICATION ID
             |--------------------------------------------------------------------------
             */
 
             $applicationId =
-                $pdo->lastInsertId();
+                (int) $pdo->lastInsertId();
 
 
             /*
             |--------------------------------------------------------------------------
-            | Prepare Match Data
-            |--------------------------------------------------------------------------
-            */
-
-            $matchScore =
-                $matchResult["score"] ?? 0;
-
-            $matchedSkills =
-                $matchResult["matched_skills"] ?? [];
-
-            $missingSkills =
-                $matchResult["missing_skills"] ?? [];
-
-
-            $matchedSkillsText =
-                implode(
-                    ", ",
-                    $matchedSkills
-                );
-
-            $missingSkillsText =
-                implode(
-                    ", ",
-                    $missingSkills
-                );
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | Insert Application Match
+            | INSERT MATCH RESULT
             |--------------------------------------------------------------------------
             */
 
@@ -435,8 +566,19 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     matched_skills,
                     missing_skills
                 )
-                VALUES (?, ?, ?, 0, 0, ?, ?)
+
+                VALUES
+                (
+                    ?,
+                    ?,
+                    ?,
+                    0,
+                    0,
+                    ?,
+                    ?
+                )
             ");
+
 
             $stmt->execute([
 
@@ -446,16 +588,20 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
                 $matchScore,
 
-                $matchedSkillsText ?: null,
+                $matchedSkillsText !== ""
+                    ? $matchedSkillsText
+                    : null,
 
-                $missingSkillsText ?: null
+                $missingSkillsText !== ""
+                    ? $missingSkillsText
+                    : null
 
             ]);
 
 
             /*
             |--------------------------------------------------------------------------
-            | Commit Transaction
+            | COMMIT
             |--------------------------------------------------------------------------
             */
 
@@ -464,7 +610,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
             /*
             |--------------------------------------------------------------------------
-            | Redirect
+            | REDIRECT
             |--------------------------------------------------------------------------
             */
 
@@ -478,327 +624,579 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         } catch (PDOException $e) {
 
-            /*
-            |--------------------------------------------------------------------------
-            | Rollback
-            |--------------------------------------------------------------------------
-            */
-
-            if ($pdo->inTransaction()) {
+            if (
+                $pdo->inTransaction()
+            ) {
 
                 $pdo->rollBack();
-
             }
 
 
-            /*
-            |--------------------------------------------------------------------------
-            | Duplicate Application
-            |--------------------------------------------------------------------------
-            */
-
-            if ($e->getCode() === "23000") {
+            if (
+                $e->getCode()
+                === "23000"
+            ) {
 
                 $error =
                     "You have already applied for this job.";
 
             } else {
 
-                $error =
-                    "Database Error: "
-                    . $e->getMessage();
+                error_log(
+                    $e->getMessage()
+                );
 
+
+                $error =
+                    "A database error occurred while processing "
+                    . "your application. Please try again.";
             }
+
 
         } catch (Exception $e) {
 
-            if ($pdo->inTransaction()) {
+            if (
+                $pdo->inTransaction()
+            ) {
 
                 $pdo->rollBack();
-
             }
 
+
             $error =
-                "Failed to process your resume. "
-                . $e->getMessage();
-
+                $e->getMessage();
         }
-
     }
-
 }
 
 ?>
 
-
 <!DOCTYPE html>
+
 <html lang="en">
 
 <head>
 
-    <meta charset="UTF-8">
+<meta charset="UTF-8">
 
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
+<meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+>
 
-    <title>
-        Apply -
-        <?= htmlspecialchars(
-            $job["job_title"]
-        ) ?>
-    </title>
+<title>
+    Apply -
+    <?= htmlspecialchars(
+        $job["job_title"]
+    ) ?>
+</title>
 
 
-    <style>
+<style>
 
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
+* {
+    box-sizing:
+        border-box;
 
+    margin:
+        0;
 
-        body {
-            font-family: Arial, sans-serif;
-            background: #f5f7fb;
-            color: #333;
-        }
+    padding:
+        0;
+}
 
 
-        .navbar {
-            background: white;
-            border-bottom: 1px solid #ddd;
+body {
 
-            padding: 16px 40px;
+    font-family:
+        Arial,
+        Helvetica,
+        sans-serif;
 
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
+    background:
+        #f5f7fb;
 
+    color:
+        #333;
+}
 
-        .logo {
-            font-size: 24px;
-            font-weight: bold;
-            color: #2563eb;
-        }
 
+.navbar {
 
-        .nav-links {
-            display: flex;
-            gap: 20px;
-        }
+    background:
+        white;
 
+    border-bottom:
+        1px solid #ddd;
 
-        .nav-links a {
-            text-decoration: none;
-            color: #333;
-        }
+    padding:
+        16px 40px;
 
+    display:
+        flex;
 
-        .container {
-            max-width: 800px;
-            margin: 40px auto;
-            padding: 0 20px;
-        }
+    justify-content:
+        space-between;
 
+    align-items:
+        center;
+}
 
-        .back {
-            display: inline-block;
-            margin-bottom: 20px;
 
-            color: #2563eb;
-            text-decoration: none;
-        }
+.logo {
 
+    font-size:
+        24px;
 
-        .card {
-            background: white;
-            padding: 30px;
+    font-weight:
+        bold;
 
-            border-radius: 10px;
+    color:
+        #2563eb;
+}
 
-            box-shadow:
-                0 2px 10px rgba(0,0,0,0.05);
 
-            margin-bottom: 20px;
-        }
+.nav-links {
 
+    display:
+        flex;
 
-        .job-summary {
-            background: #f8fafc;
-            padding: 20px;
+    gap:
+        20px;
 
-            border-radius: 8px;
+    align-items:
+        center;
+}
 
-            margin-bottom: 25px;
-        }
 
+.nav-links a {
 
-        .job-summary h2 {
-            margin-bottom: 8px;
-        }
+    text-decoration:
+        none;
 
+    color:
+        #333;
+}
 
-        .company {
-            color: #555;
-            margin-bottom: 8px;
-        }
 
+.nav-links a:hover {
 
-        .details {
-            color: #777;
-            font-size: 14px;
-            line-height: 1.7;
-        }
+    color:
+        #2563eb;
+}
 
 
-        .skills {
-            margin-top: 12px;
-            color: #555;
-        }
+.container {
 
+    max-width:
+        800px;
 
-        h1 {
-            margin-bottom: 10px;
-        }
+    margin:
+        40px auto;
 
+    padding:
+        0 20px 50px;
+}
 
-        .subtitle {
-            color: #666;
-            margin-bottom: 25px;
-        }
 
+.back {
 
-        .message {
-            padding: 12px;
-            border-radius: 6px;
-            margin-bottom: 20px;
-        }
+    display:
+        inline-block;
 
+    margin-bottom:
+        20px;
 
-        .error {
-            background: #fee2e2;
-            color: #991b1b;
-        }
+    color:
+        #2563eb;
 
+    text-decoration:
+        none;
+}
 
-        label {
-            display: block;
-            font-weight: bold;
-            margin-bottom: 8px;
-        }
 
+.back:hover {
 
-        .form-group {
-            margin-bottom: 22px;
-        }
+    text-decoration:
+        underline;
+}
 
 
-        select,
-        textarea {
-            width: 100%;
+.card {
 
-            padding: 12px;
+    background:
+        white;
 
-            border: 1px solid #ccc;
+    padding:
+        30px;
 
-            border-radius: 6px;
+    border-radius:
+        10px;
 
-            font-size: 15px;
-        }
+    box-shadow:
+        0 2px 10px
+        rgba(
+            0,
+            0,
+            0,
+            0.05
+        );
 
+    margin-bottom:
+        20px;
+}
 
-        textarea {
-            min-height: 180px;
-            resize: vertical;
-        }
 
+.job-summary {
 
-        .resume-option {
-            border: 1px solid #ddd;
+    background:
+        #f8fafc;
 
-            padding: 15px;
+    padding:
+        20px;
 
-            border-radius: 7px;
+    border-radius:
+        8px;
 
-            margin-bottom: 10px;
-        }
+    margin-bottom:
+        25px;
+}
 
 
-        .resume-option label {
-            cursor: pointer;
-            margin: 0;
-        }
+.job-summary h2 {
 
+    margin-bottom:
+        8px;
+}
 
-        .resume-date {
-            color: #777;
-            font-size: 13px;
-            margin-top: 5px;
-        }
 
+.company {
 
-        button {
-            width: 100%;
+    color:
+        #555;
 
-            padding: 13px;
+    margin-bottom:
+        8px;
+}
 
-            background: #2563eb;
 
-            color: white;
+.details {
 
-            border: none;
+    color:
+        #777;
 
-            border-radius: 6px;
+    font-size:
+        14px;
 
-            font-size: 16px;
+    line-height:
+        1.7;
+}
 
-            cursor: pointer;
-        }
 
+.skills {
 
-        button:hover {
-            background: #1d4ed8;
-        }
+    margin-top:
+        12px;
 
+    color:
+        #555;
 
-        .no-resume {
-            background: #fef3c7;
+    line-height:
+        1.6;
+}
 
-            color: #92400e;
 
-            padding: 15px;
+h1 {
 
-            border-radius: 7px;
+    margin-bottom:
+        10px;
+}
 
-            line-height: 1.5;
-        }
 
+.subtitle {
 
-        .no-resume a {
-            color: #92400e;
-            font-weight: bold;
-        }
+    color:
+        #666;
 
+    margin-bottom:
+        25px;
 
-        @media (max-width: 700px) {
+    line-height:
+        1.5;
+}
 
-            .navbar {
-                padding: 15px 20px;
-            }
 
+.message {
 
-            .nav-links {
-                gap: 10px;
-                font-size: 14px;
-            }
+    padding:
+        14px;
 
-        }
+    border-radius:
+        6px;
 
-    </style>
+    margin-bottom:
+        20px;
+
+    line-height:
+        1.5;
+}
+
+
+.error {
+
+    background:
+        #fee2e2;
+
+    color:
+        #991b1b;
+
+    border:
+        1px solid #fecaca;
+}
+
+
+label {
+
+    display:
+        block;
+
+    font-weight:
+        bold;
+
+    margin-bottom:
+        8px;
+}
+
+
+.form-group {
+
+    margin-bottom:
+        22px;
+}
+
+
+textarea {
+
+    width:
+        100%;
+
+    padding:
+        12px;
+
+    border:
+        1px solid #ccc;
+
+    border-radius:
+        6px;
+
+    font-size:
+        15px;
+
+    font-family:
+        Arial,
+        Helvetica,
+        sans-serif;
+
+    min-height:
+        180px;
+
+    resize:
+        vertical;
+}
+
+
+.resume-option {
+
+    border:
+        1px solid #ddd;
+
+    padding:
+        15px;
+
+    border-radius:
+        7px;
+
+    margin-bottom:
+        10px;
+}
+
+
+.resume-option:hover {
+
+    border-color:
+        #93c5fd;
+
+    background:
+        #f8fbff;
+}
+
+
+.resume-option label {
+
+    cursor:
+        pointer;
+
+    margin:
+        0;
+}
+
+
+.resume-date {
+
+    color:
+        #777;
+
+    font-size:
+        13px;
+
+    margin-top:
+        5px;
+}
+
+
+button {
+
+    width:
+        100%;
+
+    padding:
+        13px;
+
+    background:
+        #2563eb;
+
+    color:
+        white;
+
+    border:
+        none;
+
+    border-radius:
+        6px;
+
+    font-size:
+        16px;
+
+    cursor:
+        pointer;
+}
+
+
+button:hover {
+
+    background:
+        #1d4ed8;
+}
+
+
+.no-resume {
+
+    background:
+        #fef3c7;
+
+    color:
+        #92400e;
+
+    padding:
+        15px;
+
+    border-radius:
+        7px;
+
+    line-height:
+        1.5;
+}
+
+
+.no-resume a {
+
+    color:
+        #92400e;
+
+    font-weight:
+        bold;
+}
+
+
+.match-info {
+
+    margin-bottom:
+        22px;
+
+    padding:
+        15px;
+
+    background:
+        #eff6ff;
+
+    border:
+        1px solid #bfdbfe;
+
+    border-radius:
+        7px;
+
+    color:
+        #1e40af;
+
+    font-size:
+        13px;
+
+    line-height:
+        1.6;
+}
+
+
+@media (
+    max-width: 700px
+) {
+
+    .navbar {
+
+        padding:
+            15px 20px;
+
+        flex-direction:
+            column;
+
+        align-items:
+            flex-start;
+
+        gap:
+            15px;
+    }
+
+
+    .nav-links {
+
+        gap:
+            10px;
+
+        flex-wrap:
+            wrap;
+
+        font-size:
+            14px;
+    }
+
+
+    .container {
+
+        margin:
+            25px auto;
+
+        padding:
+            0 15px 35px;
+    }
+
+
+    .card {
+
+        padding:
+            20px;
+    }
+}
+
+</style>
 
 </head>
 
@@ -807,6 +1205,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
 
 <nav class="navbar">
+
 
     <div class="logo">
         JobPortal
@@ -827,11 +1226,20 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             Dashboard
         </a>
 
+        <a href="../applicant/resume.php">
+            Resume
+        </a>
+
+        <a href="../applicant/applications.php">
+            Applications
+        </a>
+
         <a href="../logout.php">
             Logout
         </a>
 
     </div>
+
 
 </nav>
 
@@ -840,7 +1248,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
 
     <a
-        href="view.php?id=<?= $job["id"] ?>"
+        href="view.php?id=<?= (int) $job["id"] ?>"
         class="back"
     >
         ← Back to Job
@@ -857,14 +1265,12 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         <p class="subtitle">
 
-            Submit your application and your resume
-            will be automatically matched against
-            the requirements for this position.
+            Submit your application and your
+            skills will be automatically matched
+            against the employer's job requirements.
 
         </p>
 
-
-        <!-- Job Summary -->
 
         <div class="job-summary">
 
@@ -872,7 +1278,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             <h2>
 
                 <?= htmlspecialchars(
-                    $job["job_title"]
+                    $job[
+                        "job_title"
+                    ]
                 ) ?>
 
             </h2>
@@ -881,7 +1289,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             <div class="company">
 
                 <?= htmlspecialchars(
-                    $job["company_name"]
+                    $job[
+                        "company_name"
+                    ]
                 ) ?>
 
             </div>
@@ -889,23 +1299,33 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
             <div class="details">
 
+
                 <?= htmlspecialchars(
-                    $job["location"]
+                    $job[
+                        "location"
+                    ]
                     ?? "Not specified"
                 ) ?>
 
+
                 &nbsp; • &nbsp;
 
+
                 <?= htmlspecialchars(
-                    $job["employment_type"]
+                    $job[
+                        "employment_type"
+                    ]
                 ) ?>
 
 
                 <?php if (
                     !empty(
-                        $job["application_deadline"]
+                        $job[
+                            "application_deadline"
+                        ]
                     )
                 ): ?>
+
 
                     <br>
 
@@ -914,18 +1334,24 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     <?= date(
                         "M d, Y",
                         strtotime(
-                            $job["application_deadline"]
+                            $job[
+                                "application_deadline"
+                            ]
                         )
                     ) ?>
+
 
                 <?php endif; ?>
 
 
                 <?php if (
                     !empty(
-                        $job["requirements"]
+                        $job[
+                            "requirements"
+                        ]
                     )
                 ): ?>
+
 
                     <div class="skills">
 
@@ -933,24 +1359,30 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                             Requirements:
                         </strong>
 
+                        <br>
+
                         <?= nl2br(
                             htmlspecialchars(
-                                $job["requirements"]
+                                $job[
+                                    "requirements"
+                                ]
                             )
                         ) ?>
 
                     </div>
 
+
                 <?php endif; ?>
 
+
             </div>
+
 
         </div>
 
 
-        <!-- Error -->
-
         <?php if ($error): ?>
+
 
             <div class="message error">
 
@@ -959,6 +1391,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 ) ?>
 
             </div>
+
 
         <?php endif; ?>
 
@@ -970,16 +1403,18 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
             <div class="no-resume">
 
-                You don't have a resume uploaded yet.
+                You don't have a resume
+                uploaded yet.
 
                 <br><br>
 
                 Please
 
-                <a
-                    href="../applicant/resume.php"
-                >
-                    upload your resume
+                <a href="../applicant/resume.php">
+
+                    download the resume template
+                    and upload your completed resume
+
                 </a>
 
                 before applying.
@@ -990,13 +1425,27 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         <?php else: ?>
 
 
+            <div class="match-info">
+
+                <strong>
+                    Resume Matching:
+                </strong>
+
+                Only the
+                <strong>
+                    Skills and Competencies
+                </strong>
+                section of your resume will be
+                used for skills matching.
+
+            </div>
+
+
             <form
                 method="POST"
-                action="apply.php?id=<?= $job["id"] ?>"
+                action="apply.php?id=<?= (int) $job["id"] ?>"
             >
 
-
-                <!-- Resume -->
 
                 <div class="form-group">
 
@@ -1008,7 +1457,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
                     <?php foreach (
                         $resumes
-                        as $index => $resume
+                        as
+                        $index => $resume
                     ): ?>
 
 
@@ -1020,17 +1470,24 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
                                 <input
                                     type="radio"
+
                                     name="resume_id"
-                                    value="<?= $resume["id"] ?>"
+
+                                    value="<?= (int) $resume["id"] ?>"
+
                                     <?= $index === 0
                                         ? "checked"
-                                        : "" ?>
+                                        : ""
+                                    ?>
+
                                     required
                                 >
 
 
                                 <?= htmlspecialchars(
-                                    $resume["file_name"]
+                                    $resume[
+                                        "file_name"
+                                    ]
                                 ) ?>
 
 
@@ -1039,28 +1496,33 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
                             <div class="resume-date">
 
+
                                 Uploaded:
 
                                 <?= date(
                                     "M d, Y h:i A",
                                     strtotime(
-                                        $resume["uploaded_at"]
+                                        $resume[
+                                            "uploaded_at"
+                                        ]
                                     )
                                 ) ?>
 
 
                                 <?php if (
                                     !empty(
-                                        $resume["extracted_text"]
+                                        $resume[
+                                            "extracted_text"
+                                        ]
                                     )
                                 ): ?>
 
                                     <br>
 
-                                    ✓ Resume text
-                                    ready for matching
+                                    ✓ Resume text ready for matching
 
                                 <?php endif; ?>
+
 
                             </div>
 
@@ -1073,8 +1535,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
                 </div>
 
-
-                <!-- Cover Letter -->
 
                 <div class="form-group">
 
@@ -1093,14 +1553,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 </div>
 
 
-                <!-- Submit -->
-
                 <button
                     type="submit"
                 >
-
                     Submit Application
-
                 </button>
 
 
