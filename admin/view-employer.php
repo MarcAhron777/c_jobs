@@ -1440,14 +1440,9 @@ body {
 
     <div class="navbar-container">
 
-
-        <a
-            href="dashboard.php"
-            class="logo"
-        >
+        <a href="dashboard.php" class="logo">
             Job Portal Admin
         </a>
-
 
         <div class="nav-links">
 
@@ -1467,10 +1462,9 @@ body {
                 Manage Applicants
             </a>
 
-            <a
-                href="../logout.php"
-                class="logout"
-            >
+            <a href="reports.php">Manage Reports</a>
+
+            <a href="../logout.php" class="logout">
                 Logout
             </a>
 

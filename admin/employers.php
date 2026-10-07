@@ -642,45 +642,33 @@ td {
 
     <div class="navbar-container">
 
-
-        <a
-            href="dashboard.php"
-            class="logo"
-        >
+        <a href="dashboard.php" class="logo">
             Job Portal Admin
         </a>
 
-
         <div class="nav-links">
-
 
             <a href="dashboard.php">
                 Dashboard
             </a>
 
-
             <a href="jobs.php">
                 Manage Jobs
             </a>
-
 
             <a href="employers.php">
                 Manage Employers
             </a>
 
-
             <a href="applicants.php">
                 Manage Applicants
             </a>
 
+            <a href="reports.php">Manage Reports</a>
 
-            <a
-                href="../logout.php"
-                class="logout"
-            >
+            <a href="../logout.php" class="logout">
                 Logout
             </a>
-
 
         </div>
 

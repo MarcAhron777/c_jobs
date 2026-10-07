@@ -264,6 +264,8 @@ $applicants = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 Manage Applicants
             </a>
 
+            <a href="reports.php">Manage Reports</a>
+
             <a href="../logout.php" class="logout">
                 Logout
             </a>
