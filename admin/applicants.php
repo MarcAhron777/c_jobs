@@ -4,24 +4,40 @@ session_start();
 
 require_once "../config/database.php";
 
-if (!isset($_SESSION["user_id"]) || $_SESSION["role"] !== "admin") {
+if (
+    !isset($_SESSION["user_id"]) ||
+    ($_SESSION["role"] ?? "") !== "admin"
+) {
     header("Location: ../login.php");
     exit;
 }
 
 
-// =========================
-// ACTIVATE / DEACTIVATE
-// =========================
+/*
+|--------------------------------------------------------------------------
+| ACTIVATE / DEACTIVATE
+|--------------------------------------------------------------------------
+*/
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    $userId = isset($_POST["user_id"])
+        ? (int) $_POST["user_id"]
+        : 0;
 
-    $userId = $_POST["user_id"] ?? null;
-    $action = $_POST["action"] ?? null;
+    $action = $_POST["action"] ?? "";
 
-    if ($userId && in_array($action, ["activate", "deactivate"], true)) {
-
-        $isActive = $action === "activate" ? 1 : 0;
+    if (
+        $userId > 0 &&
+        in_array(
+            $action,
+            ["activate", "deactivate"],
+            true
+        )
+    ) {
+        $isActive =
+            $action === "activate"
+                ? 1
+                : 0;
 
         $stmt = $pdo->prepare("
             UPDATE users
@@ -41,9 +57,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 }
 
 
-// =========================
-// GET APPLICANTS
-// =========================
+/*
+|--------------------------------------------------------------------------
+| GET APPLICANTS
+|--------------------------------------------------------------------------
+*/
 
 $stmt = $pdo->query("
     SELECT
@@ -53,8 +71,8 @@ $stmt = $pdo->query("
         a.last_name,
         a.phone,
         a.address,
-        a.bio,
         a.created_at,
+
         u.email,
         u.is_active,
 
@@ -78,7 +96,8 @@ $stmt = $pdo->query("
     ORDER BY a.created_at DESC
 ");
 
-$applicants = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$applicants =
+    $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 ?>
 
@@ -87,195 +106,121 @@ $applicants = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 <head>
 
-    <meta charset="UTF-8">
+<meta charset="UTF-8">
 
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+>
 
-    <title>Applicants - Admin</title>
+<title>
+    Applicants - Admin
+</title>
 
-    <style>
+<style>
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
 
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
+body {
+    font-family: Arial, Helvetica, sans-serif;
+    background: #f5f7fb;
+    color: #222;
+}
 
-        body {
-            font-family: Arial, Helvetica, sans-serif;
-            background: #f5f7fb;
-        }
+.container {
+    max-width: 1250px;
+    margin: 40px auto;
+    padding: 0 20px 50px;
+}
 
-        .navbar {
-            background: #111827;
-            padding: 18px 50px;
-        }
+h1 {
+    margin-bottom: 10px;
+}
 
-        .navbar-container {
-            max-width: 1200px;
-            margin: auto;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
+.description {
+    color: #666;
+    margin-bottom: 30px;
+}
 
-        .logo {
-            color: white;
-            text-decoration: none;
-            font-size: 22px;
-            font-weight: bold;
-        }
+.table-container {
+    background: #ffffff;
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+    overflow-x: auto;
+}
 
-        .nav-links {
-            display: flex;
-            gap: 20px;
-            align-items: center;
-        }
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
 
-        .nav-links a {
-            color: white;
-            text-decoration: none;
-            font-size: 14px;
-        }
+th,
+td {
+    padding: 15px;
+    text-align: left;
+    border-bottom: 1px solid #eee;
+    vertical-align: middle;
+}
 
-        .logout {
-            background: #dc2626;
-            padding: 8px 14px;
-            border-radius: 5px;
-        }
+th {
+    background: #f9fafb;
+    font-size: 13px;
+}
 
-        .container {
-            max-width: 1250px;
-            margin: 40px auto;
-            padding: 0 20px;
-        }
+td {
+    font-size: 14px;
+}
 
-        h1 {
-            margin-bottom: 10px;
-        }
+.status {
+    display: inline-block;
+    padding: 5px 10px;
+    border-radius: 15px;
+    font-size: 12px;
+    font-weight: bold;
+}
 
-        .description {
-            color: #666;
-            margin-bottom: 30px;
-        }
+.active-status {
+    background: #dcfce7;
+    color: #166534;
+}
 
-        .table-container {
-            background: white;
-            border-radius: 8px;
-            border: 1px solid #e5e7eb;
-            overflow-x: auto;
-        }
+.inactive-status {
+    background: #fee2e2;
+    color: #991b1b;
+}
 
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
+.btn {
+    border: none;
+    padding: 7px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    color: #ffffff;
+    font-size: 12px;
+}
 
-        th,
-        td {
-            padding: 15px;
-            text-align: left;
-            border-bottom: 1px solid #eee;
-        }
+.activate {
+    background: #16a34a;
+}
 
-        th {
-            background: #f9fafb;
-            font-size: 13px;
-        }
+.deactivate {
+    background: #dc2626;
+}
 
-        td {
-            font-size: 14px;
-        }
-
-        .status {
-            padding: 5px 10px;
-            border-radius: 15px;
-            font-size: 12px;
-            font-weight: bold;
-        }
-
-        .active {
-            background: #dcfce7;
-            color: #166534;
-        }
-
-        .inactive {
-            background: #fee2e2;
-            color: #991b1b;
-        }
-
-        .btn {
-            border: none;
-            padding: 7px 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            color: white;
-            font-size: 12px;
-        }
-
-        .activate {
-            background: #16a34a;
-        }
-
-        .deactivate {
-            background: #dc2626;
-        }
-
-        .view-btn {
-            display: inline-block;
-            background: #2563eb;
-            color: white;
-            padding: 7px 12px;
-            border-radius: 4px;
-            text-decoration: none;
-            font-size: 12px;
-        }
-
-    </style>
+.empty {
+    text-align: center;
+    padding: 35px;
+    color: #64748b;
+}
+</style>
 
 </head>
 
 <body>
 
-
-<nav class="navbar">
-
-    <div class="navbar-container">
-
-        <a href="dashboard.php" class="logo">
-            Job Portal Admin
-        </a>
-
-        <div class="nav-links">
-
-            <a href="dashboard.php">
-                Dashboard
-            </a>
-
-            <a href="jobs.php">
-                Manage Jobs
-            </a>
-
-            <a href="employers.php">
-                Manage Employers
-            </a>
-
-            <a href="applicants.php">
-                Manage Applicants
-            </a>
-
-            <a href="reports.php">Manage Reports</a>
-
-            <a href="../logout.php" class="logout">
-                Logout
-            </a>
-
-        </div>
-
-    </div>
-
-</nav>
-
+<?php require __DIR__ . "/includes/header.php"; ?>
 
 <div class="container">
 
@@ -287,7 +232,6 @@ $applicants = $stmt->fetchAll(PDO::FETCH_ASSOC);
         View and manage registered applicants.
     </p>
 
-
     <div class="table-container">
 
         <table>
@@ -295,202 +239,149 @@ $applicants = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <thead>
 
                 <tr>
-
-                    <th>
-                        Name
-                    </th>
-
-                    <th>
-                        Email
-                    </th>
-
-                    <th>
-                        Phone
-                    </th>
-
-                    <th>
-                        Applications
-                    </th>
-
-                    <th>
-                        Resumes
-                    </th>
-
-                    <th>
-                        Status
-                    </th>
-
-                    <th>
-                        Registered
-                    </th>
-
-                    <th>
-                        Action
-                    </th>
-
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>Applications</th>
+                    <th>Resumes</th>
+                    <th>Status</th>
+                    <th>Registered</th>
+                    <th>Action</th>
                 </tr>
 
             </thead>
 
-
             <tbody>
 
-                <?php if (empty($applicants)): ?>
+            <?php if (empty($applicants)): ?>
+
+                <tr>
+                    <td colspan="8" class="empty">
+                        No applicants found.
+                    </td>
+                </tr>
+
+            <?php else: ?>
+
+                <?php foreach ($applicants as $applicant): ?>
 
                     <tr>
 
-                        <td colspan="8">
-                            No applicants found.
+                        <td>
+                            <strong>
+                                <?= htmlspecialchars(
+                                    $applicant["first_name"]
+                                    . " "
+                                    . $applicant["last_name"]
+                                ) ?>
+                            </strong>
+                        </td>
+
+                        <td>
+                            <?= htmlspecialchars(
+                                $applicant["email"]
+                            ) ?>
+                        </td>
+
+                        <td>
+                            <?= htmlspecialchars(
+                                $applicant["phone"]
+                                ?: "N/A"
+                            ) ?>
+                        </td>
+
+                        <td>
+                            <?= (int)
+                                $applicant["total_applications"]
+                            ?>
+                        </td>
+
+                        <td>
+                            <?= (int)
+                                $applicant["total_resumes"]
+                            ?>
+                        </td>
+
+                        <td>
+
+                            <?php if ($applicant["is_active"]): ?>
+
+                                <span class="status active-status">
+                                    Active
+                                </span>
+
+                            <?php else: ?>
+
+                                <span class="status inactive-status">
+                                    Inactive
+                                </span>
+
+                            <?php endif; ?>
+
+                        </td>
+
+                        <td>
+                            <?= date(
+                                "M d, Y",
+                                strtotime(
+                                    $applicant["created_at"]
+                                )
+                            ) ?>
+                        </td>
+
+                        <td>
+
+                            <form method="POST">
+
+                                <input
+                                    type="hidden"
+                                    name="user_id"
+                                    value="<?= (int)
+                                        $applicant["user_id"]
+                                    ?>"
+                                >
+
+                                <?php if ($applicant["is_active"]): ?>
+
+                                    <input
+                                        type="hidden"
+                                        name="action"
+                                        value="deactivate"
+                                    >
+
+                                    <button
+                                        type="submit"
+                                        class="btn deactivate"
+                                    >
+                                        Deactivate
+                                    </button>
+
+                                <?php else: ?>
+
+                                    <input
+                                        type="hidden"
+                                        name="action"
+                                        value="activate"
+                                    >
+
+                                    <button
+                                        type="submit"
+                                        class="btn activate"
+                                    >
+                                        Activate
+                                    </button>
+
+                                <?php endif; ?>
+
+                            </form>
+
                         </td>
 
                     </tr>
 
-                <?php else: ?>
+                <?php endforeach; ?>
 
-                    <?php foreach ($applicants as $applicant): ?>
-
-                        <tr>
-
-                            <td>
-
-                                <strong>
-
-                                    <?php
-                                    echo htmlspecialchars(
-                                        $applicant["first_name"]
-                                        . " "
-                                        . $applicant["last_name"]
-                                    );
-                                    ?>
-
-                                </strong>
-
-                            </td>
-
-
-                            <td>
-
-                                <?php
-                                echo htmlspecialchars(
-                                    $applicant["email"]
-                                );
-                                ?>
-
-                            </td>
-
-
-                            <td>
-
-                                <?php
-                                echo htmlspecialchars(
-                                    $applicant["phone"] ?: "N/A"
-                                );
-                                ?>
-
-                            </td>
-
-
-                            <td>
-
-                                <?php
-                                echo $applicant["total_applications"];
-                                ?>
-
-                            </td>
-
-
-                            <td>
-
-                                <?php
-                                echo $applicant["total_resumes"];
-                                ?>
-
-                            </td>
-
-
-                            <td>
-
-                                <?php if ($applicant["is_active"]): ?>
-
-                                    <span class="status active">
-                                        Active
-                                    </span>
-
-                                <?php else: ?>
-
-                                    <span class="status inactive">
-                                        Inactive
-                                    </span>
-
-                                <?php endif; ?>
-
-                            </td>
-
-
-                            <td>
-
-                                <?php
-                                echo date(
-                                    "M d, Y",
-                                    strtotime($applicant["created_at"])
-                                );
-                                ?>
-
-                            </td>
-
-
-                            <td>
-
-                                <form method="POST">
-
-                                    <input
-                                        type="hidden"
-                                        name="user_id"
-                                        value="<?php echo $applicant["user_id"]; ?>"
-                                    >
-
-
-                                    <?php if ($applicant["is_active"]): ?>
-
-                                        <input
-                                            type="hidden"
-                                            name="action"
-                                            value="deactivate"
-                                        >
-
-                                        <button
-                                            type="submit"
-                                            class="btn deactivate"
-                                        >
-                                            Deactivate
-                                        </button>
-
-                                    <?php else: ?>
-
-                                        <input
-                                            type="hidden"
-                                            name="action"
-                                            value="activate"
-                                        >
-
-                                        <button
-                                            type="submit"
-                                            class="btn activate"
-                                        >
-                                            Activate
-                                        </button>
-
-                                    <?php endif; ?>
-
-                                </form>
-
-                            </td>
-
-                        </tr>
-
-                    <?php endforeach; ?>
-
-                <?php endif; ?>
+            <?php endif; ?>
 
             </tbody>
 
@@ -500,7 +391,5 @@ $applicants = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 </div>
 
-
 </body>
-
 </html>

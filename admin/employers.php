@@ -4,16 +4,9 @@ session_start();
 
 require_once "../config/database.php";
 
-
-/*
-|--------------------------------------------------------------------------
-| AUTH CHECK
-|--------------------------------------------------------------------------
-*/
-
 if (
     !isset($_SESSION["user_id"]) ||
-    $_SESSION["role"] !== "admin"
+    ($_SESSION["role"] ?? "") !== "admin"
 ) {
     header("Location: ../login.php");
     exit;
@@ -27,33 +20,24 @@ if (
 */
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    $userId = isset($_POST["user_id"])
+        ? (int) $_POST["user_id"]
+        : 0;
 
-    $userId =
-        $_POST["user_id"]
-        ?? null;
-
-    $action =
-        $_POST["action"]
-        ?? null;
-
+    $action = $_POST["action"] ?? "";
 
     if (
-        $userId &&
+        $userId > 0 &&
         in_array(
             $action,
-            [
-                "activate",
-                "deactivate"
-            ],
+            ["activate", "deactivate"],
             true
         )
     ) {
-
         $isActive =
             $action === "activate"
-            ? 1
-            : 0;
-
+                ? 1
+                : 0;
 
         $stmt = $pdo->prepare("
             UPDATE users
@@ -62,18 +46,13 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             AND role = 'employer'
         ");
 
-
         $stmt->execute([
             $isActive,
             $userId
         ]);
     }
 
-
-    header(
-        "Location: employers.php"
-    );
-
+    header("Location: employers.php");
     exit;
 }
 
@@ -86,31 +65,19 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
 $stmt = $pdo->query("
     SELECT
-
         e.id,
-
         e.user_id,
-
         e.company_name,
-
-        e.company_description,
-
+        e.employer_type,
         e.contact_person,
-
         e.contact_number,
-
         e.address,
-
         e.barangay,
-
         e.caloocan_area,
-
         e.verification_status,
-
         e.created_at,
 
         u.email,
-
         u.is_active,
 
         (
@@ -127,17 +94,12 @@ $stmt = $pdo->query("
     ORDER BY e.created_at DESC
 ");
 
-
 $employers =
-    $stmt->fetchAll(
-        PDO::FETCH_ASSOC
-    );
+    $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 ?>
 
-
 <!DOCTYPE html>
-
 <html lang="en">
 
 <head>
@@ -153,919 +115,369 @@ $employers =
     Employers - Admin
 </title>
 
-
 <style>
-
 * {
-    box-sizing:
-        border-box;
-
-    margin:
-        0;
-
-    padding:
-        0;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
 }
-
 
 body {
-
-    font-family:
-        Arial,
-        Helvetica,
-        sans-serif;
-
-    background:
-        #f5f7fb;
+    font-family: Arial, Helvetica, sans-serif;
+    background: #f5f7fb;
+    color: #222;
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| NAVBAR
-|--------------------------------------------------------------------------
-*/
-
-.navbar {
-
-    background:
-        #111827;
-
-    padding:
-        18px 50px;
-}
-
-
-.navbar-container {
-
-    max-width:
-        1200px;
-
-    margin:
-        auto;
-
-    display:
-        flex;
-
-    justify-content:
-        space-between;
-
-    align-items:
-        center;
-}
-
-
-.logo {
-
-    color:
-        white;
-
-    text-decoration:
-        none;
-
-    font-size:
-        22px;
-
-    font-weight:
-        bold;
-}
-
-
-.nav-links {
-
-    display:
-        flex;
-
-    gap:
-        20px;
-
-    align-items:
-        center;
-}
-
-
-.nav-links a {
-
-    color:
-        white;
-
-    text-decoration:
-        none;
-
-    font-size:
-        14px;
-}
-
-
-.logout {
-
-    background:
-        #dc2626;
-
-    padding:
-        8px 14px;
-
-    border-radius:
-        5px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| CONTAINER
-|--------------------------------------------------------------------------
-*/
 
 .container {
-
-    max-width:
-        1250px;
-
-    margin:
-        40px auto;
-
-    padding:
-        0 20px;
+    max-width: 1350px;
+    margin: 40px auto;
+    padding: 0 20px 50px;
 }
-
 
 h1 {
-
-    margin-bottom:
-        10px;
+    margin-bottom: 10px;
 }
-
 
 .description {
-
-    color:
-        #666;
-
-    margin-bottom:
-        30px;
+    color: #666;
+    margin-bottom: 30px;
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| TABLE
-|--------------------------------------------------------------------------
-*/
 
 .table-container {
-
-    background:
-        white;
-
-    border-radius:
-        8px;
-
-    border:
-        1px solid #e5e7eb;
-
-    overflow-x:
-        auto;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    overflow-x: auto;
 }
-
 
 table {
-
-    width:
-        100%;
-
-    border-collapse:
-        collapse;
+    width: 100%;
+    border-collapse: collapse;
 }
-
 
 th,
 td {
-
-    padding:
-        15px;
-
-    text-align:
-        left;
-
-    border-bottom:
-        1px solid #eee;
-
-    vertical-align:
-        middle;
+    padding: 14px;
+    text-align: left;
+    border-bottom: 1px solid #eee;
+    vertical-align: middle;
 }
-
 
 th {
-
-    background:
-        #f9fafb;
-
-    font-size:
-        13px;
+    background: #f9fafb;
+    font-size: 13px;
 }
-
 
 td {
-
-    font-size:
-        14px;
+    font-size: 14px;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| STATUS
-|--------------------------------------------------------------------------
-*/
-
-.status {
-
-    display:
-        inline-block;
-
-    padding:
-        5px 10px;
-
-    border-radius:
-        15px;
-
-    font-size:
-        12px;
-
-    font-weight:
-        bold;
+.badge {
+    display: inline-block;
+    padding: 5px 10px;
+    border-radius: 15px;
+    font-size: 12px;
+    font-weight: bold;
 }
 
-
-.active {
-
-    background:
-        #dcfce7;
-
-    color:
-        #166534;
+.type-private {
+    background: #e0e7ff;
+    color: #3730a3;
 }
 
-
-.inactive {
-
-    background:
-        #fee2e2;
-
-    color:
-        #991b1b;
+.type-lgu {
+    background: #dbeafe;
+    color: #1d4ed8;
 }
-
 
 .pending {
-
-    background:
-        #fef3c7;
-
-    color:
-        #92400e;
+    background: #fef3c7;
+    color: #92400e;
 }
-
 
 .approved {
-
-    background:
-        #dcfce7;
-
-    color:
-        #166534;
+    background: #dcfce7;
+    color: #166534;
 }
-
 
 .rejected {
-
-    background:
-        #fee2e2;
-
-    color:
-        #991b1b;
+    background: #fee2e2;
+    color: #991b1b;
 }
-
 
 .unverified {
-
-    background:
-        #e5e7eb;
-
-    color:
-        #374151;
+    background: #e5e7eb;
+    color: #374151;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| AREA
-|--------------------------------------------------------------------------
-*/
-
-.area {
-
-    display:
-        inline-block;
-
-    padding:
-        5px 10px;
-
-    border-radius:
-        15px;
-
-    font-size:
-        12px;
-
-    font-weight:
-        bold;
+.active-status {
+    background: #dcfce7;
+    color: #166534;
 }
 
+.inactive-status {
+    background: #fee2e2;
+    color: #991b1b;
+}
 
 .north {
-
-    background:
-        #dbeafe;
-
-    color:
-        #1e40af;
+    background: #dbeafe;
+    color: #1e40af;
 }
-
 
 .south {
-
-    background:
-        #dcfce7;
-
-    color:
-        #166534;
+    background: #dcfce7;
+    color: #166534;
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| BUTTONS
-|--------------------------------------------------------------------------
-*/
 
 .actions {
-
-    display:
-        flex;
-
-    gap:
-        7px;
-
-    align-items:
-        center;
-
-    flex-wrap:
-        wrap;
+    display: flex;
+    gap: 7px;
+    flex-wrap: wrap;
+    align-items: center;
 }
-
 
 .actions form {
-
-    margin:
-        0;
+    margin: 0;
 }
-
 
 .btn {
-
-    display:
-        inline-block;
-
-    border:
-        none;
-
-    padding:
-        7px 12px;
-
-    border-radius:
-        4px;
-
-    cursor:
-        pointer;
-
-    color:
-        white;
-
-    font-size:
-        12px;
-
-    text-decoration:
-        none;
+    display: inline-block;
+    padding: 7px 12px;
+    border: none;
+    border-radius: 4px;
+    color: #ffffff;
+    font-size: 12px;
+    text-decoration: none;
+    cursor: pointer;
 }
-
 
 .view {
-
-    background:
-        #2563eb;
+    background: #2563eb;
 }
-
-
-.view:hover {
-
-    background:
-        #1d4ed8;
-}
-
 
 .activate {
-
-    background:
-        #16a34a;
+    background: #16a34a;
 }
-
 
 .deactivate {
-
-    background:
-        #dc2626;
+    background: #dc2626;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| MOBILE
-|--------------------------------------------------------------------------
-*/
-
-@media (max-width: 800px) {
-
-    .navbar {
-
-        padding:
-            15px 20px;
-    }
-
-
-    .navbar-container {
-
-        flex-direction:
-            column;
-
-        align-items:
-            flex-start;
-
-        gap:
-            15px;
-    }
-
-
-    .nav-links {
-
-        flex-wrap:
-            wrap;
-
-        gap:
-            12px;
-    }
-
+.empty {
+    text-align: center;
+    padding: 35px;
+    color: #64748b;
 }
-
 </style>
 
 </head>
 
-
 <body>
 
-
-<!-- =========================================================
-     NAVBAR
-========================================================= -->
-
-<nav class="navbar">
-
-    <div class="navbar-container">
-
-        <a href="dashboard.php" class="logo">
-            Job Portal Admin
-        </a>
-
-        <div class="nav-links">
-
-            <a href="dashboard.php">
-                Dashboard
-            </a>
-
-            <a href="jobs.php">
-                Manage Jobs
-            </a>
-
-            <a href="employers.php">
-                Manage Employers
-            </a>
-
-            <a href="applicants.php">
-                Manage Applicants
-            </a>
-
-            <a href="reports.php">Manage Reports</a>
-
-            <a href="../logout.php" class="logout">
-                Logout
-            </a>
-
-        </div>
-
-    </div>
-
-</nav>
-
-
-
-<!-- =========================================================
-     MAIN
-========================================================= -->
+<?php require __DIR__ . "/includes/header.php"; ?>
 
 <div class="container">
-
 
     <h1>
         Employers
     </h1>
 
-
     <p class="description">
-        View and manage registered employers.
+        View and verify registered Private and LGU employers.
     </p>
-
-
 
     <div class="table-container">
 
         <table>
 
-
             <thead>
 
                 <tr>
-
-                    <th>
-                        Company
-                    </th>
-
-                    <th>
-                        Email
-                    </th>
-
-                    <th>
-                        Contact
-                    </th>
-
-                    <th>
-                        Barangay
-                    </th>
-
-                    <th>
-                        Area
-                    </th>
-
-                    <th>
-                        Jobs
-                    </th>
-
-                    <th>
-                        Verification
-                    </th>
-
-                    <th>
-                        Account
-                    </th>
-
-                    <th>
-                        Registered
-                    </th>
-
-                    <th>
-                        Action
-                    </th>
-
+                    <th>Company / Organization</th>
+                    <th>Employer Type</th>
+                    <th>Email</th>
+                    <th>Contact</th>
+                    <th>Barangay</th>
+                    <th>Area</th>
+                    <th>Jobs</th>
+                    <th>Verification</th>
+                    <th>Account</th>
+                    <th>Registered</th>
+                    <th>Action</th>
                 </tr>
 
             </thead>
 
-
-
             <tbody>
 
-
-            <?php if (
-                empty($employers)
-            ): ?>
-
+            <?php if (empty($employers)): ?>
 
                 <tr>
-
-                    <td colspan="10">
-
+                    <td colspan="11" class="empty">
                         No employers found.
-
                     </td>
-
                 </tr>
-
 
             <?php else: ?>
 
+                <?php foreach ($employers as $employer): ?>
 
-                <?php foreach (
-                    $employers
-                    as $employer
-                ): ?>
+                    <?php
+                    $type =
+                        $employer["employer_type"]
+                        ?? "private";
 
+                    $verificationStatus =
+                        $employer["verification_status"]
+                        ?: "unverified";
+                    ?>
 
                     <tr>
 
-
-                        <!-- COMPANY -->
-
                         <td>
-
                             <strong>
-
                                 <?= htmlspecialchars(
-                                    $employer[
-                                        "company_name"
-                                    ]
+                                    $employer["company_name"]
                                 ) ?>
-
                             </strong>
-
                         </td>
-
-
-
-                        <!-- EMAIL -->
 
                         <td>
 
-                            <?= htmlspecialchars(
-                                $employer[
-                                    "email"
-                                ]
-                            ) ?>
+                            <?php if ($type === "lgu"): ?>
 
-                        </td>
-
-
-
-                        <!-- CONTACT -->
-
-                        <td>
-
-                            <?= htmlspecialchars(
-                                $employer[
-                                    "contact_person"
-                                ]
-                                ?: "N/A"
-                            ) ?>
-
-                            <br>
-
-                            <small>
-
-                                <?= htmlspecialchars(
-                                    $employer[
-                                        "contact_number"
-                                    ]
-                                    ?: ""
-                                ) ?>
-
-                            </small>
-
-                        </td>
-
-
-
-                        <!-- BARANGAY -->
-
-                        <td>
-
-                            <?= htmlspecialchars(
-                                $employer[
-                                    "barangay"
-                                ]
-                                ?: "N/A"
-                            ) ?>
-
-                        </td>
-
-
-
-                        <!-- AREA -->
-
-                        <td>
-
-
-                            <?php if (
-                                !empty(
-                                    $employer[
-                                        "caloocan_area"
-                                    ]
-                                )
-                            ): ?>
-
-
-                                <span
-                                    class="
-                                        area
-                                        <?= htmlspecialchars(
-                                            $employer[
-                                                "caloocan_area"
-                                            ]
-                                        ) ?>
-                                    "
-                                >
-
-                                    <?= strtoupper(
-                                        htmlspecialchars(
-                                            $employer[
-                                                "caloocan_area"
-                                            ]
-                                        )
-                                    ) ?>
-
+                                <span class="badge type-lgu">
+                                    LGU
                                 </span>
-
 
                             <?php else: ?>
 
+                                <span class="badge type-private">
+                                    Private Employer
+                                </span>
+
+                            <?php endif; ?>
+
+                        </td>
+
+                        <td>
+                            <?= htmlspecialchars(
+                                $employer["email"]
+                            ) ?>
+                        </td>
+
+                        <td>
+                            <?= htmlspecialchars(
+                                $employer["contact_number"]
+                                ?: "N/A"
+                            ) ?>
+                        </td>
+
+                        <td>
+                            <?= htmlspecialchars(
+                                $employer["barangay"]
+                                ?: "N/A"
+                            ) ?>
+                        </td>
+
+                        <td>
+
+                            <?php if (
+                                $employer["caloocan_area"] === "north"
+                            ): ?>
+
+                                <span class="badge north">
+                                    North
+                                </span>
+
+                            <?php elseif (
+                                $employer["caloocan_area"] === "south"
+                            ): ?>
+
+                                <span class="badge south">
+                                    South
+                                </span>
+
+                            <?php else: ?>
 
                                 N/A
 
-
                             <?php endif; ?>
 
-
                         </td>
 
-
-
-                        <!-- JOBS -->
-
                         <td>
-
                             <?= (int)
-                                $employer[
-                                    "total_jobs"
-                                ]
+                                $employer["total_jobs"]
                             ?>
-
                         </td>
 
-
-
-                        <!-- VERIFICATION -->
-
                         <td>
-
-
-                            <?php
-
-                            $verificationStatus =
-                                $employer[
-                                    "verification_status"
-                                ]
-                                ?: "unverified";
-
-                            ?>
-
-
                             <span
-                                class="
-                                    status
-                                    <?= htmlspecialchars(
-                                        $verificationStatus
-                                    ) ?>
-                                "
+                                class="badge <?= htmlspecialchars(
+                                    $verificationStatus
+                                ) ?>"
                             >
-
-                                <?= ucfirst(
-                                    htmlspecialchars(
+                                <?= htmlspecialchars(
+                                    ucfirst(
                                         $verificationStatus
                                     )
                                 ) ?>
-
                             </span>
-
-
                         </td>
-
-
-
-                        <!-- ACCOUNT -->
 
                         <td>
 
+                            <?php if ($employer["is_active"]): ?>
 
-                            <?php if (
-                                $employer[
-                                    "is_active"
-                                ]
-                            ): ?>
-
-
-                                <span
-                                    class="
-                                        status
-                                        active
-                                    "
-                                >
+                                <span class="badge active-status">
                                     Active
                                 </span>
 
-
                             <?php else: ?>
 
-
-                                <span
-                                    class="
-                                        status
-                                        inactive
-                                    "
-                                >
+                                <span class="badge inactive-status">
                                     Inactive
                                 </span>
 
-
                             <?php endif; ?>
-
 
                         </td>
 
-
-
-                        <!-- REGISTERED -->
-
                         <td>
-
                             <?= date(
                                 "M d, Y",
                                 strtotime(
-                                    $employer[
-                                        "created_at"
-                                    ]
+                                    $employer["created_at"]
                                 )
                             ) ?>
-
                         </td>
-
-
-
-                        <!-- ACTION -->
 
                         <td>
 
-
                             <div class="actions">
-
-
-                                <!-- VIEW -->
 
                                 <a
                                     href="view-employer.php?id=<?= (int)
-                                        $employer[
-                                            "id"
-                                        ]
+                                        $employer["id"]
                                     ?>"
-                                    class="
-                                        btn
-                                        view
-                                    "
+                                    class="btn view"
                                 >
                                     View
                                 </a>
 
-
-
-                                <!-- ACTIVATE / DEACTIVATE -->
-
                                 <form method="POST">
-
 
                                     <input
                                         type="hidden"
                                         name="user_id"
-
                                         value="<?= (int)
-                                            $employer[
-                                                "user_id"
-                                            ]
+                                            $employer["user_id"]
                                         ?>"
                                     >
 
-
-                                    <?php if (
-                                        $employer[
-                                            "is_active"
-                                        ]
-                                    ): ?>
-
+                                    <?php if ($employer["is_active"]): ?>
 
                                         <input
                                             type="hidden"
@@ -1073,20 +485,14 @@ td {
                                             value="deactivate"
                                         >
 
-
                                         <button
                                             type="submit"
-                                            class="
-                                                btn
-                                                deactivate
-                                            "
+                                            class="btn deactivate"
                                         >
                                             Deactivate
                                         </button>
 
-
                                     <?php else: ?>
-
 
                                         <input
                                             type="hidden"
@@ -1094,38 +500,26 @@ td {
                                             value="activate"
                                         >
 
-
                                         <button
                                             type="submit"
-                                            class="
-                                                btn
-                                                activate
-                                            "
+                                            class="btn activate"
                                         >
                                             Activate
                                         </button>
 
-
                                     <?php endif; ?>
-
 
                                 </form>
 
-
                             </div>
-
 
                         </td>
 
-
                     </tr>
-
 
                 <?php endforeach; ?>
 
-
             <?php endif; ?>
-
 
             </tbody>
 
@@ -1135,7 +529,5 @@ td {
 
 </div>
 
-
 </body>
-
 </html>

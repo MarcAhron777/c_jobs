@@ -4,33 +4,18 @@ session_start();
 
 require_once "../config/database.php";
 
-
-/*
-|--------------------------------------------------------------------------
-| AUTH CHECK
-|--------------------------------------------------------------------------
-*/
-
 if (
     !isset($_SESSION["user_id"]) ||
-    $_SESSION["role"] !== "employer"
+    ($_SESSION["role"] ?? "") !== "employer"
 ) {
     header("Location: ../login.php");
     exit;
 }
 
-
 $userId = (int) $_SESSION["user_id"];
 
 $success = "";
 $error = "";
-
-
-/*
-|--------------------------------------------------------------------------
-| UPLOAD DIRECTORY
-|--------------------------------------------------------------------------
-*/
 
 $uploadDir = "../uploads/verification/";
 
@@ -41,14 +26,15 @@ if (!is_dir($uploadDir)) {
 
 /*
 |--------------------------------------------------------------------------
-| DOCUMENT UPLOAD FUNCTION
+| UPLOAD DOCUMENT
 |--------------------------------------------------------------------------
 */
 
-function uploadDocument($file, $uploadDir)
+function uploadDocument($file, string $uploadDir): ?string
 {
     if (
-        !isset($file) ||
+        !$file ||
+        !isset($file["error"]) ||
         $file["error"] === UPLOAD_ERR_NO_FILE
     ) {
         return null;
@@ -60,24 +46,11 @@ function uploadDocument($file, $uploadDir)
         );
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | MAX FILE SIZE: 5MB
-    |--------------------------------------------------------------------------
-    */
-
-    if ($file["size"] > 5 * 1024 * 1024) {
+    if (($file["size"] ?? 0) > 5 * 1024 * 1024) {
         throw new Exception(
             "File size must not exceed 5MB."
         );
     }
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | MIME TYPE
-    |--------------------------------------------------------------------------
-    */
 
     $allowedTypes = [
         "image/jpeg" => "jpg",
@@ -85,51 +58,28 @@ function uploadDocument($file, $uploadDir)
         "application/pdf" => "pdf"
     ];
 
+    $finfo = new finfo(FILEINFO_MIME_TYPE);
 
-    $finfo = new finfo(
-        FILEINFO_MIME_TYPE
+    $mimeType = $finfo->file(
+        $file["tmp_name"]
     );
 
-
-    $mimeType =
-        $finfo->file(
-            $file["tmp_name"]
-        );
-
-
-    if (
-        !isset(
-            $allowedTypes[$mimeType]
-        )
-    ) {
+    if (!isset($allowedTypes[$mimeType])) {
         throw new Exception(
             "Only JPG, PNG, and PDF files are allowed."
         );
     }
 
-
-    /*
-    |--------------------------------------------------------------------------
-    | RANDOM FILE NAME
-    |--------------------------------------------------------------------------
-    */
-
-    $extension =
-        $allowedTypes[$mimeType];
-
+    $extension = $allowedTypes[$mimeType];
 
     $filename =
-        bin2hex(
-            random_bytes(16)
-        )
+        bin2hex(random_bytes(16))
         . "."
         . $extension;
-
 
     $destination =
         $uploadDir
         . $filename;
-
 
     if (
         !move_uploaded_file(
@@ -142,7 +92,6 @@ function uploadDocument($file, $uploadDir)
         );
     }
 
-
     return $filename;
 }
 
@@ -153,10 +102,9 @@ function uploadDocument($file, $uploadDir)
 |--------------------------------------------------------------------------
 */
 
-function verificationStatusClass($status)
+function verificationStatusClass(?string $status): string
 {
     switch ($status) {
-
         case "approved":
         case "passed":
             return "approved-status";
@@ -177,8 +125,7 @@ function verificationStatusClass($status)
     }
 }
 
-
-function verificationStatusLabel($status)
+function verificationStatusLabel(?string $status): string
 {
     if (!$status) {
         return "Unverified";
@@ -200,57 +147,44 @@ function verificationStatusLabel($status)
 |--------------------------------------------------------------------------
 */
 
-$stmt =
-    $pdo->prepare("
+$stmt = $pdo->prepare("
+    SELECT
+        id,
+        user_id,
+        company_name,
+        employer_type,
+        company_description,
+        company_logo,
+        contact_person,
+        contact_number,
+        address,
+        barangay,
+        latitude,
+        longitude,
+        caloocan_area,
+        verification_status,
+        created_at,
+        updated_at
+    FROM employers
+    WHERE user_id = ?
+    LIMIT 1
+");
 
-        SELECT
+$stmt->execute([$userId]);
 
-            id,
-            user_id,
-            company_name,
-            company_description,
-            company_logo,
-            contact_person,
-            contact_number,
-            address,
-            barangay,
-            latitude,
-            longitude,
-            caloocan_area,
-            verification_status,
-            created_at,
-            updated_at
-
-        FROM employers
-
-        WHERE user_id = ?
-
-        LIMIT 1
-
-    ");
-
-
-$stmt->execute([
-    $userId
-]);
-
-
-$employer =
-    $stmt->fetch(
-        PDO::FETCH_ASSOC
-    );
-
+$employer = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$employer) {
-
-    die(
-        "Employer profile not found."
-    );
+    die("Employer profile not found.");
 }
 
+$employerId = (int) $employer["id"];
 
-$employerId =
-    (int) $employer["id"];
+$employerType = $employer["employer_type"] ?? "private";
+
+$employerTypeLabel = $employerType === "lgu"
+    ? "Local Government Unit (LGU)"
+    : "Private Employer";
 
 
 /*
@@ -259,29 +193,16 @@ $employerId =
 |--------------------------------------------------------------------------
 */
 
-$stmt =
-    $pdo->prepare("
+$stmt = $pdo->prepare("
+    SELECT *
+    FROM employer_verifications
+    WHERE employer_id = ?
+    LIMIT 1
+");
 
-        SELECT *
+$stmt->execute([$employerId]);
 
-        FROM employer_verifications
-
-        WHERE employer_id = ?
-
-        LIMIT 1
-
-    ");
-
-
-$stmt->execute([
-    $employerId
-]);
-
-
-$verification =
-    $stmt->fetch(
-        PDO::FETCH_ASSOC
-    );
+$verification = $stmt->fetch(PDO::FETCH_ASSOC);
 
 
 /*
@@ -290,79 +211,70 @@ $verification =
 |--------------------------------------------------------------------------
 */
 
-if (
-    $_SERVER["REQUEST_METHOD"]
-    === "POST"
-) {
-
+if ($_SERVER["REQUEST_METHOD"] === "POST") {
     try {
+        $companyName = trim(
+            $_POST["company_name"] ?? ""
+        );
 
-        /*
-        |--------------------------------------------------------------------------
-        | INPUTS
-        |--------------------------------------------------------------------------
-        */
+        $companyDescription = trim(
+            $_POST["company_description"] ?? ""
+        );
 
-        $companyName =
-            trim(
-                $_POST["company_name"]
-                ?? ""
-            );
+        $contactPerson = trim(
+            $_POST["contact_person"] ?? ""
+        );
 
+        $contactNumber = trim(
+            $_POST["contact_number"] ?? ""
+        );
 
-        $companyDescription =
-            trim(
-                $_POST["company_description"]
-                ?? ""
-            );
+        $address = trim(
+            $_POST["address"] ?? ""
+        );
 
+        $barangay = trim(
+            $_POST["barangay"] ?? ""
+        );
 
-        $contactPerson =
-            trim(
-                $_POST["contact_person"]
-                ?? ""
-            );
+        $latitude = trim(
+            $_POST["latitude"] ?? ""
+        );
 
-
-        $contactNumber =
-            trim(
-                $_POST["contact_number"]
-                ?? ""
-            );
-
-
-        $address =
-            trim(
-                $_POST["address"]
-                ?? ""
-            );
-
-
-        $barangay =
-            trim(
-                $_POST["barangay"]
-                ?? ""
-            );
+        $longitude = trim(
+            $_POST["longitude"] ?? ""
+        );
 
 
         /*
         |--------------------------------------------------------------------------
-        | HIDDEN COORDINATES
+        | VALIDATION
         |--------------------------------------------------------------------------
         */
 
-        $latitude =
-            trim(
-                $_POST["latitude"]
-                ?? ""
+        if ($companyName === "") {
+            throw new Exception(
+                "Company / Organization Name is required."
             );
+        }
 
-
-        $longitude =
-            trim(
-                $_POST["longitude"]
-                ?? ""
+        if ($contactPerson === "") {
+            throw new Exception(
+                "Contact person is required."
             );
+        }
+
+        if ($address === "") {
+            throw new Exception(
+                "Company / Organization address is required."
+            );
+        }
+
+        if ($barangay === "") {
+            throw new Exception(
+                "Barangay is required."
+            );
+        }
 
 
         /*
@@ -372,9 +284,7 @@ if (
         */
 
         $caloocanArea = null;
-
         $barangayNumber = null;
-
 
         preg_match(
             '/\d+/',
@@ -382,95 +292,24 @@ if (
             $barangayMatch
         );
 
-
-        if (
-            !empty(
-                $barangayMatch
-            )
-        ) {
-
+        if (!empty($barangayMatch)) {
             $barangayNumber =
-                (int)
-                $barangayMatch[0];
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | SOUTH CALOOCAN
-            |--------------------------------------------------------------------------
-            */
+                (int) $barangayMatch[0];
 
             if (
                 $barangayNumber >= 1 &&
                 $barangayNumber <= 164
             ) {
-
-                $caloocanArea =
-                    "south";
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | NORTH CALOOCAN
-            |--------------------------------------------------------------------------
-            */
-
+                $caloocanArea = "south";
             } elseif (
                 $barangayNumber >= 165 &&
                 $barangayNumber <= 188
             ) {
-
-                $caloocanArea =
-                    "north";
+                $caloocanArea = "north";
             }
         }
 
-
-        /*
-        |--------------------------------------------------------------------------
-        | VALIDATION
-        |--------------------------------------------------------------------------
-        */
-
-        if (
-            $companyName === ""
-        ) {
-            throw new Exception(
-                "Company name is required."
-            );
-        }
-
-
-        if (
-            $contactPerson === ""
-        ) {
-            throw new Exception(
-                "Contact person is required."
-            );
-        }
-
-
-        if (
-            $address === ""
-        ) {
-            throw new Exception(
-                "Company address is required."
-            );
-        }
-
-
-        if (
-            $barangay === ""
-        ) {
-            throw new Exception(
-                "Barangay is required."
-            );
-        }
-
-
-        if (
-            $caloocanArea === null
-        ) {
+        if ($caloocanArea === null) {
             throw new Exception(
                 "Please enter a valid Caloocan barangay number from 1 to 188."
             );
@@ -487,37 +326,22 @@ if (
             $latitude === "" ||
             $longitude === ""
         ) {
-
             throw new Exception(
-                "Please click Use My Current Location to set your business location."
+                "Please set your business or organization location."
             );
         }
-
 
         if (
             !is_numeric($latitude) ||
             !is_numeric($longitude)
         ) {
-
             throw new Exception(
-                "Invalid business location."
+                "Invalid latitude or longitude."
             );
         }
 
-
-        /*
-        |--------------------------------------------------------------------------
-        | VALIDATE COORDINATE RANGE
-        |--------------------------------------------------------------------------
-        */
-
-        $latitudeValue =
-            (float) $latitude;
-
-
-        $longitudeValue =
-            (float) $longitude;
-
+        $latitudeValue = (float) $latitude;
+        $longitudeValue = (float) $longitude;
 
         if (
             $latitudeValue < -90 ||
@@ -527,7 +351,6 @@ if (
                 "Invalid latitude."
             );
         }
-
 
         if (
             $longitudeValue < -180 ||
@@ -543,34 +366,30 @@ if (
         |--------------------------------------------------------------------------
         | UPDATE EMPLOYER
         |--------------------------------------------------------------------------
+        |
+        | employer_type is intentionally NOT updated here.
+        | It comes from registration and is reviewed by the admin.
+        |
         */
 
-        $stmt =
-            $pdo->prepare("
-
-                UPDATE employers
-
-                SET
-
-                    company_name = ?,
-                    company_description = ?,
-                    contact_person = ?,
-                    contact_number = ?,
-                    address = ?,
-                    barangay = ?,
-                    latitude = ?,
-                    longitude = ?,
-                    caloocan_area = ?,
-                    verification_status = 'pending',
-                    updated_at = NOW()
-
-                WHERE id = ?
-
-            ");
-
+        $stmt = $pdo->prepare("
+            UPDATE employers
+            SET
+                company_name = ?,
+                company_description = ?,
+                contact_person = ?,
+                contact_number = ?,
+                address = ?,
+                barangay = ?,
+                latitude = ?,
+                longitude = ?,
+                caloocan_area = ?,
+                verification_status = 'pending',
+                updated_at = NOW()
+            WHERE id = ?
+        ");
 
         $stmt->execute([
-
             $companyName,
 
             $companyDescription !== ""
@@ -584,17 +403,11 @@ if (
                 : null,
 
             $address,
-
             $barangay,
-
             $latitudeValue,
-
             $longitudeValue,
-
             $caloocanArea,
-
             $employerId
-
         ]);
 
 
@@ -604,28 +417,20 @@ if (
         |--------------------------------------------------------------------------
         */
 
-        $governmentId =
-            uploadDocument(
-                $_FILES["government_id"]
-                ?? null,
-                $uploadDir
-            );
+        $governmentId = uploadDocument(
+            $_FILES["government_id"] ?? null,
+            $uploadDir
+        );
 
+        $barangayCertificate = uploadDocument(
+            $_FILES["barangay_certificate"] ?? null,
+            $uploadDir
+        );
 
-        $barangayCertificate =
-            uploadDocument(
-                $_FILES["barangay_certificate"]
-                ?? null,
-                $uploadDir
-            );
-
-
-        $businessPermit =
-            uploadDocument(
-                $_FILES["business_permit"]
-                ?? null,
-                $uploadDir
-            );
+        $businessPermit = uploadDocument(
+            $_FILES["business_permit"] ?? null,
+            $uploadDir
+        );
 
 
         /*
@@ -635,35 +440,55 @@ if (
         */
 
         if ($verification) {
-
             if (!$governmentId) {
-
                 $governmentId =
-                    $verification[
-                        "government_id"
-                    ]
+                    $verification["government_id"]
                     ?? null;
             }
-
 
             if (!$barangayCertificate) {
-
                 $barangayCertificate =
-                    $verification[
-                        "barangay_certificate"
-                    ]
+                    $verification["barangay_certificate"]
                     ?? null;
             }
-
 
             if (!$businessPermit) {
-
                 $businessPermit =
-                    $verification[
-                        "business_permit"
-                    ]
+                    $verification["business_permit"]
                     ?? null;
             }
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | DOCUMENT REQUIREMENTS
+        |--------------------------------------------------------------------------
+        */
+
+        if (!$governmentId) {
+            throw new Exception(
+                "Government ID is required for verification."
+            );
+        }
+
+        if (!$barangayCertificate) {
+            throw new Exception(
+                "Barangay Certificate is required for verification."
+            );
+        }
+
+        /*
+         * Business Permit is required for Private Employers.
+         * LGU employers do not need a Business Permit.
+         */
+        if (
+            $employerType === "private" &&
+            !$businessPermit
+        ) {
+            throw new Exception(
+                "Business Permit is required for Private Employers."
+            );
         }
 
 
@@ -674,87 +499,57 @@ if (
         */
 
         if ($verification) {
-
-            $stmt =
-                $pdo->prepare("
-
-                    UPDATE employer_verifications
-
-                    SET
-
-                        government_id = ?,
-                        barangay_certificate = ?,
-                        business_permit = ?,
-
-                        detected_address = NULL,
-
-                        document_status = 'pending',
-                        location_status = 'pending',
-                        admin_status = 'pending',
-
-                        submitted_at = NOW()
-
-                    WHERE employer_id = ?
-
-                ");
-
+            $stmt = $pdo->prepare("
+                UPDATE employer_verifications
+                SET
+                    government_id = ?,
+                    barangay_certificate = ?,
+                    business_permit = ?,
+                    detected_address = NULL,
+                    document_status = 'pending',
+                    location_status = 'pending',
+                    admin_status = 'pending',
+                    submitted_at = NOW()
+                WHERE employer_id = ?
+            ");
 
             $stmt->execute([
-
                 $governmentId,
-
                 $barangayCertificate,
-
                 $businessPermit,
-
                 $employerId
-
             ]);
-
         } else {
-
-            $stmt =
-                $pdo->prepare("
-
-                    INSERT INTO employer_verifications
-                    (
-                        employer_id,
-                        government_id,
-                        barangay_certificate,
-                        business_permit,
-                        detected_address,
-                        document_status,
-                        location_status,
-                        admin_status,
-                        submitted_at
-                    )
-
-                    VALUES
-                    (
-                        ?,
-                        ?,
-                        ?,
-                        ?,
-                        NULL,
-                        'pending',
-                        'pending',
-                        'pending',
-                        NOW()
-                    )
-
-                ");
-
+            $stmt = $pdo->prepare("
+                INSERT INTO employer_verifications (
+                    employer_id,
+                    government_id,
+                    barangay_certificate,
+                    business_permit,
+                    detected_address,
+                    document_status,
+                    location_status,
+                    admin_status,
+                    submitted_at
+                )
+                VALUES (
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    NULL,
+                    'pending',
+                    'pending',
+                    'pending',
+                    NOW()
+                )
+            ");
 
             $stmt->execute([
-
                 $employerId,
-
                 $governmentId,
-
                 $barangayCertificate,
-
                 $businessPermit
-
             ]);
         }
 
@@ -766,10 +561,7 @@ if (
         */
 
         $success =
-            "Profile saved successfully. "
-            . "Your area was detected as "
-            . strtoupper($caloocanArea)
-            . " CALOOCAN.";
+            "Profile saved successfully. Your information has been submitted for verification.";
 
 
         /*
@@ -778,29 +570,42 @@ if (
         |--------------------------------------------------------------------------
         */
 
-        $stmt =
-            $pdo->prepare("
+        $stmt = $pdo->prepare("
+            SELECT
+                id,
+                user_id,
+                company_name,
+                employer_type,
+                company_description,
+                company_logo,
+                contact_person,
+                contact_number,
+                address,
+                barangay,
+                latitude,
+                longitude,
+                caloocan_area,
+                verification_status,
+                created_at,
+                updated_at
+            FROM employers
+            WHERE id = ?
+            LIMIT 1
+        ");
 
-                SELECT *
-
-                FROM employers
-
-                WHERE id = ?
-
-                LIMIT 1
-
-            ");
-
-
-        $stmt->execute([
-            $employerId
-        ]);
-
+        $stmt->execute([$employerId]);
 
         $employer =
-            $stmt->fetch(
-                PDO::FETCH_ASSOC
-            );
+            $stmt->fetch(PDO::FETCH_ASSOC);
+
+        $employerType =
+            $employer["employer_type"]
+            ?? "private";
+
+        $employerTypeLabel =
+            $employerType === "lgu"
+                ? "Local Government Unit (LGU)"
+                : "Private Employer";
 
 
         /*
@@ -809,1024 +614,454 @@ if (
         |--------------------------------------------------------------------------
         */
 
-        $stmt =
-            $pdo->prepare("
+        $stmt = $pdo->prepare("
+            SELECT *
+            FROM employer_verifications
+            WHERE employer_id = ?
+            LIMIT 1
+        ");
 
-                SELECT *
-
-                FROM employer_verifications
-
-                WHERE employer_id = ?
-
-                LIMIT 1
-
-            ");
-
-
-        $stmt->execute([
-            $employerId
-        ]);
-
+        $stmt->execute([$employerId]);
 
         $verification =
-            $stmt->fetch(
-                PDO::FETCH_ASSOC
-            );
+            $stmt->fetch(PDO::FETCH_ASSOC);
 
-
-    } catch (
-        PDOException $e
-    ) {
-
-        error_log(
-            $e->getMessage()
-        );
-
-
-        $error =
-            "Database error. Please try again.";
-
-
-    } catch (
-        Exception $e
-    ) {
-
-        $error =
-            $e->getMessage();
+    } catch (Throwable $e) {
+        $error = $e->getMessage();
     }
 }
+
+
+/*
+|--------------------------------------------------------------------------
+| STATUS VALUES
+|--------------------------------------------------------------------------
+*/
+
+$documentStatus =
+    $verification["document_status"]
+    ?? "unverified";
+
+$locationVerificationStatus =
+    $verification["location_status"]
+    ?? "unverified";
+
+$adminStatus =
+    $verification["admin_status"]
+    ?? "unverified";
+
+$accountStatus =
+    $employer["verification_status"]
+    ?? "unverified";
+
+$adminNotes =
+    trim(
+        $verification["admin_notes"]
+        ?? ""
+    );
 
 ?>
 
 <!DOCTYPE html>
-
 <html lang="en">
 
 <head>
 
-<meta charset="UTF-8">
-
-<meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0"
->
-
-<title>
-    Employer Profile - Caloocan Job Portal
-</title>
-
-
-<style>
-
-* {
-    box-sizing:
-        border-box;
-
-    margin:
-        0;
-
-    padding:
-        0;
-}
-
-
-body {
-
-    font-family:
-        Arial,
-        Helvetica,
-        sans-serif;
-
-    background:
-        #f5f7fb;
-
-    color:
-        #333;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| NAVBAR
-|--------------------------------------------------------------------------
-*/
-
-.navbar {
-
-    background:
-        #ffffff;
-
-    border-bottom:
-        1px solid #e5e7eb;
-
-    padding:
-        16px 40px;
-
-    display:
-        flex;
-
-    justify-content:
-        space-between;
-
-    align-items:
-        center;
-}
-
-
-.logo {
-
-    font-size:
-        24px;
-
-    font-weight:
-        bold;
-
-    color:
-        #2563eb;
-}
-
-
-.nav-links {
-
-    display:
-        flex;
-
-    gap:
-        20px;
-
-    align-items:
-        center;
-}
-
-
-.nav-links a {
-
-    text-decoration:
-        none;
-
-    color:
-        #333;
-
-    font-size:
-        14px;
-}
-
-
-.nav-links a:hover,
-.nav-links .active {
-
-    color:
-        #2563eb;
-}
-
-
-.nav-links .active {
-
-    font-weight:
-        bold;
-}
-
-
-.logout {
-
-    color:
-        #dc2626 !important;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| CONTAINER
-|--------------------------------------------------------------------------
-*/
-
-.container {
-
-    max-width:
-        1200px;
-
-    margin:
-        40px auto;
-
-    padding:
-        0 20px 50px;
-}
-
-
-.welcome {
-
-    margin-bottom:
-        30px;
-}
-
-
-.welcome h1 {
-
-    margin-bottom:
-        8px;
-}
-
-
-.welcome p {
-
-    color:
-        #666;
-
-    line-height:
-        1.5;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| ALERT
-|--------------------------------------------------------------------------
-*/
-
-.alert {
-
-    padding:
-        15px 18px;
-
-    border-radius:
-        8px;
-
-    margin-bottom:
-        20px;
-
-    line-height:
-        1.5;
-}
-
-
-.alert-success {
-
-    background:
-        #dcfce7;
-
-    color:
-        #166534;
-
-    border:
-        1px solid #bbf7d0;
-}
-
-
-.alert-error {
-
-    background:
-        #fee2e2;
-
-    color:
-        #991b1b;
-
-    border:
-        1px solid #fecaca;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| GRID
-|--------------------------------------------------------------------------
-*/
-
-.profile-grid {
-
-    display:
-        grid;
-
-    grid-template-columns:
-        2fr 1fr;
-
-    gap:
-        25px;
-
-    align-items:
-        start;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| CARD
-|--------------------------------------------------------------------------
-*/
-
-.card {
-
-    background:
-        white;
-
-    padding:
-        25px;
-
-    border-radius:
-        10px;
-
-    border:
-        1px solid #e5e7eb;
-
-    box-shadow:
-        0 2px 10px
-        rgba(
-            0,
-            0,
-            0,
-            0.05
-        );
-
-    margin-bottom:
-        20px;
-}
-
-
-.card h2 {
-
-    margin-bottom:
-        8px;
-}
-
-
-.card-description {
-
-    color:
-        #666;
-
-    font-size:
-        14px;
-
-    line-height:
-        1.5;
-
-    margin-bottom:
-        22px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| FORM
-|--------------------------------------------------------------------------
-*/
-
-.form-grid {
-
-    display:
-        grid;
-
-    grid-template-columns:
-        1fr 1fr;
-
-    gap:
-        18px;
-}
-
-
-.form-group {
-
-    margin-bottom:
-        18px;
-}
-
-
-.form-group.full {
-
-    grid-column:
-        1 / -1;
-}
-
-
-label {
-
-    display:
-        block;
-
-    font-weight:
-        bold;
-
-    font-size:
-        14px;
-
-    margin-bottom:
-        7px;
-}
-
-
-input[type="text"],
-input[type="tel"],
-textarea {
-
-    width:
-        100%;
-
-    padding:
-        11px 12px;
-
-    border:
-        1px solid #d1d5db;
-
-    border-radius:
-        6px;
-
-    font-size:
-        14px;
-
-    font-family:
-        Arial,
-        sans-serif;
-
-    background:
-        white;
-}
-
-
-input:focus,
-textarea:focus {
-
-    outline:
-        none;
-
-    border-color:
-        #2563eb;
-
-    box-shadow:
-        0 0 0 2px
-        rgba(
-            37,
-            99,
-            235,
-            0.08
-        );
-}
-
-
-textarea {
-
-    resize:
-        vertical;
-
-    min-height:
-        110px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| BUTTON
-|--------------------------------------------------------------------------
-*/
-
-.btn {
-
-    display:
-        inline-block;
-
-    padding:
-        11px 16px;
-
-    background:
-        #2563eb;
-
-    color:
-        white;
-
-    border:
-        none;
-
-    border-radius:
-        6px;
-
-    cursor:
-        pointer;
-
-    font-size:
-        14px;
-
-    text-decoration:
-        none;
-}
-
-
-.btn:hover {
-
-    background:
-        #1d4ed8;
-}
-
-
-.btn:disabled {
-
-    opacity:
-        0.65;
-
-    cursor:
-        not-allowed;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| LOCATION
-|--------------------------------------------------------------------------
-*/
-
-.location-status {
-
-    margin-top:
-        15px;
-
-    padding:
-        12px 14px;
-
-    background:
-        #dbeafe;
-
-    color:
-        #1e40af;
-
-    border-radius:
-        6px;
-
-    font-size:
-        14px;
-
-    line-height:
-        1.5;
-}
-
-
-.area-south {
-
-    background:
-        #dcfce7 !important;
-
-    color:
-        #166534 !important;
-}
-
-
-.area-north {
-
-    background:
-        #dbeafe !important;
-
-    color:
-        #1e40af !important;
-}
-
-
-.area-invalid {
-
-    background:
-        #fee2e2 !important;
-
-    color:
-        #991b1b !important;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| DOCUMENTS
-|--------------------------------------------------------------------------
-*/
-
-.document {
-
-    padding:
-        18px 0;
-
-    border-bottom:
-        1px solid #eee;
-}
-
-
-.document:first-of-type {
-
-    padding-top:
-        0;
-}
-
-
-.document:last-child {
-
-    border-bottom:
-        none;
-}
-
-
-.document h3 {
-
-    margin-bottom:
-        6px;
-
-    font-size:
-        16px;
-}
-
-
-.document p {
-
-    color:
-        #666;
-
-    font-size:
-        13px;
-
-    line-height:
-        1.5;
-
-    margin-bottom:
-        12px;
-}
-
-
-input[type="file"] {
-
-    width:
-        100%;
-
-    padding:
-        10px;
-
-    border:
-        1px solid #ddd;
-
-    border-radius:
-        6px;
-
-    background:
-        #fafafa;
-}
-
-
-.uploaded {
-
-    margin-top:
-        10px;
-
-    font-size:
-        13px;
-
-    font-weight:
-        bold;
-
-    color:
-        #166534;
-}
-
-
-.verification-note {
-
-    background:
-        #f8fafc;
-
-    padding:
-        15px;
-
-    border-radius:
-        8px;
-
-    border:
-        1px solid #e2e8f0;
-
-    font-size:
-        13px;
-
-    line-height:
-        1.6;
-
-    color:
-        #555;
-
-    margin-top:
-        20px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| STATUS
-|--------------------------------------------------------------------------
-*/
-
-.status-item {
-
-    padding:
-        15px 0;
-
-    border-bottom:
-        1px solid #eee;
-}
-
-
-.status-item:last-child {
-
-    border-bottom:
-        none;
-}
-
-
-.status-item-label {
-
-    color:
-        #666;
-
-    font-size:
-        13px;
-
-    margin-bottom:
-        8px;
-}
-
-
-.status {
-
-    display:
-        inline-block;
-
-    padding:
-        5px 10px;
-
-    border-radius:
-        20px;
-
-    font-size:
-        12px;
-
-    font-weight:
-        bold;
-}
-
-
-.pending-status {
-
-    background:
-        #fef3c7;
-
-    color:
-        #92400e;
-}
-
-
-.approved-status {
-
-    background:
-        #dcfce7;
-
-    color:
-        #166534;
-}
-
-
-.rejected-status {
-
-    background:
-        #fee2e2;
-
-    color:
-        #991b1b;
-}
-
-
-.review-status {
-
-    background:
-        #dbeafe;
-
-    color:
-        #1e40af;
-}
-
-
-.unverified-status {
-
-    background:
-        #e5e7eb;
-
-    color:
-        #4b5563;
-}
-
-
-.company-info p {
-
-    line-height:
-        1.5;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| MOBILE
-|--------------------------------------------------------------------------
-*/
-
-@media (
-    max-width: 800px
-) {
-
-    .profile-grid {
-
-        grid-template-columns:
-            1fr;
-    }
-
-
-    .form-grid {
-
-        grid-template-columns:
-            1fr;
-    }
-
-
-    .form-group.full {
-
-        grid-column:
-            auto;
-    }
-}
-
-
-@media (
-    max-width: 650px
-) {
-
-    .navbar {
-
-        padding:
-            15px 20px;
-
-        flex-direction:
-            column;
-
-        gap:
-            15px;
-
-        align-items:
-            flex-start;
-    }
-
-
-    .nav-links {
-
-        width:
-            100%;
-
-        gap:
-            12px;
-
-        flex-wrap:
-            wrap;
-    }
-
-
-    .container {
-
-        margin:
-            25px auto;
-
-        padding:
-            0 15px 35px;
-    }
-
-
-    .card {
-
-        padding:
-            20px;
-    }
-}
-
-</style>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        Employer Profile - Caloocan Job Portal
+    </title>
+
+    <style>
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+            background: #f5f7fb;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 40px auto;
+            padding: 0 20px 50px;
+        }
+
+        .welcome {
+            margin-bottom: 30px;
+        }
+
+        .welcome h1 {
+            margin-bottom: 8px;
+        }
+
+        .welcome p {
+            color: #64748b;
+            line-height: 1.6;
+        }
+
+        .profile-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 25px;
+            align-items: start;
+        }
+
+        .card {
+            margin-bottom: 20px;
+            padding: 25px;
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+        }
+
+        .card h2 {
+            margin-bottom: 8px;
+        }
+
+        .card-description {
+            margin-bottom: 22px;
+            color: #64748b;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .alert {
+            margin-bottom: 20px;
+            padding: 15px 18px;
+            border-radius: 8px;
+            line-height: 1.5;
+        }
+
+        .alert-success {
+            background: #dcfce7;
+            border: 1px solid #bbf7d0;
+            color: #166534;
+        }
+
+        .alert-error {
+            background: #fee2e2;
+            border: 1px solid #fecaca;
+            color: #991b1b;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 18px;
+        }
+
+        .form-group {
+            margin-bottom: 18px;
+        }
+
+        .form-group.full {
+            grid-column: 1 / -1;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 7px;
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        input[type="text"],
+        input[type="tel"],
+        textarea {
+            width: 100%;
+            padding: 11px 12px;
+            background: #fff;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-family: inherit;
+            font-size: 14px;
+        }
+
+        input:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #2563eb;
+            box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.08);
+        }
+
+        input[readonly] {
+            background: #f1f5f9;
+            color: #475569;
+            cursor: not-allowed;
+        }
+
+        textarea {
+            min-height: 110px;
+            resize: vertical;
+        }
+
+        .help-text {
+            display: block;
+            margin-top: 6px;
+            color: #64748b;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .employer-type-box {
+            padding: 15px;
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 8px;
+        }
+
+        .employer-type-box strong {
+            display: block;
+            margin-bottom: 5px;
+            color: #1e40af;
+        }
+
+        .employer-type-box p {
+            color: #475569;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 10px 15px;
+            background: #2563eb;
+            border: none;
+            border-radius: 6px;
+            color: #fff;
+            font-size: 14px;
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        .btn:hover {
+            background: #1d4ed8;
+        }
+
+        .location-status {
+            margin-top: 15px;
+            padding: 12px 14px;
+            background: #dbeafe;
+            border-radius: 6px;
+            color: #1e40af;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .area-south {
+            background: #dcfce7 !important;
+            color: #166534 !important;
+        }
+
+        .area-north {
+            background: #dbeafe !important;
+            color: #1e40af !important;
+        }
+
+        .area-invalid {
+            background: #fee2e2 !important;
+            color: #991b1b !important;
+        }
+
+        #map {
+            width: 100%;
+            height: 350px;
+            margin-top: 18px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+
+        .document {
+            padding: 18px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .document:first-of-type {
+            padding-top: 0;
+        }
+
+        .document:last-of-type {
+            border-bottom: none;
+        }
+
+        .document h3 {
+            margin-bottom: 6px;
+            font-size: 16px;
+        }
+
+        .document p {
+            margin-bottom: 12px;
+            color: #64748b;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        input[type="file"] {
+            width: 100%;
+            padding: 10px;
+            background: #fafafa;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+        }
+
+        .uploaded {
+            margin-top: 10px;
+            color: #166534;
+            font-size: 13px;
+            font-weight: bold;
+        }
+
+        .verification-note {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            color: #475569;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .status-item {
+            padding: 15px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .status-item:last-child {
+            border-bottom: none;
+        }
+
+        .status-item-label {
+            margin-bottom: 8px;
+            color: #64748b;
+            font-size: 13px;
+        }
+
+        .status {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .pending-status {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .approved-status {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .rejected-status {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .review-status {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+
+        .unverified-status {
+            background: #e5e7eb;
+            color: #4b5563;
+        }
+
+        .admin-note {
+            margin-top: 15px;
+            padding: 14px;
+            background: #fff7ed;
+            border: 1px solid #fed7aa;
+            border-radius: 7px;
+            color: #9a3412;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        @media (max-width: 800px) {
+
+            .profile-grid,
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .form-group.full {
+                grid-column: auto;
+            }
+
+        }
+
+        @media (max-width: 600px) {
+
+            .container {
+                margin: 25px auto;
+                padding: 0 15px;
+            }
+
+            .card {
+                padding: 20px;
+            }
+
+            #map {
+                height: 280px;
+            }
+
+        }
+
+    </style>
 
 </head>
 
-
 <body>
 
+<?php require __DIR__ . "/includes/header.php"; ?>
 
-<!-- =========================================================
-     NAVBAR
-========================================================= -->
-
-<nav class="navbar">
-
-
-    <div class="logo">
-
-        JobPortal
-
-    </div>
-
-
-    <div class="nav-links">
-
-
-        <a href="../index.php">
-            Home
-        </a>
-
-
-        <a href="dashboard.php">
-            Dashboard
-        </a>
-
-
-        <a
-            href="profile.php"
-            class="active"
-        >
-            Profile
-        </a>
-
-
-        <a href="jobs.php">
-            My Jobs
-        </a>
-
-
-        <a href="applicants.php">
-            Applicants
-        </a>
-
-
-        <a
-            href="../logout.php"
-            class="logout"
-        >
-            Logout
-        </a>
-
-
-    </div>
-
-
-</nav>
-
-
-<!-- =========================================================
-     MAIN
-========================================================= -->
 
 <div class="container">
 
-
     <div class="welcome">
-
 
         <h1>
             Employer Profile
         </h1>
 
-
         <p>
-
-            Manage your company information,
-            business location and verification
-            documents.
-
+            Manage your company or organization information,
+            business location, and verification documents.
         </p>
-
 
     </div>
 
 
-    <!-- =====================================================
-         SUCCESS
-    ====================================================== -->
-
     <?php if ($success): ?>
 
-
         <div class="alert alert-success">
-
-            <?= htmlspecialchars(
-                $success
-            ) ?>
-
+            <?= htmlspecialchars($success) ?>
         </div>
-
 
     <?php endif; ?>
 
 
-    <!-- =====================================================
-         ERROR
-    ====================================================== -->
-
     <?php if ($error): ?>
 
-
         <div class="alert alert-error">
-
-            <?= htmlspecialchars(
-                $error
-            ) ?>
-
+            <?= htmlspecialchars($error) ?>
         </div>
-
 
     <?php endif; ?>
 
@@ -1836,63 +1071,76 @@ input[type="file"] {
         enctype="multipart/form-data"
     >
 
-
         <div class="profile-grid">
 
 
-            <!-- =================================================
-                 LEFT COLUMN
-            ================================================== -->
+            <!-- LEFT COLUMN -->
 
             <div>
 
 
-                <!-- =================================================
-                     COMPANY INFORMATION
-                ================================================== -->
+                <!-- COMPANY / ORGANIZATION -->
 
                 <div class="card">
 
-
                     <h2>
-                        Company Information
+                        Company / Organization Information
                     </h2>
 
-
                     <p class="card-description">
-
-                        Update the information
-                        displayed for your company.
-
+                        Update the information shown for your
+                        company or organization.
                     </p>
 
 
                     <div class="form-grid">
 
 
+                        <!-- EMPLOYER TYPE -->
+
+                        <div class="form-group full">
+
+                            <label>
+                                Employer Type
+                            </label>
+
+                            <div class="employer-type-box">
+
+                                <strong>
+                                    <?= htmlspecialchars(
+                                        $employerTypeLabel
+                                    ) ?>
+                                </strong>
+
+                                <p>
+                                    Your employer type was selected
+                                    during registration and cannot
+                                    be changed from this profile.
+                                </p>
+
+                            </div>
+
+                        </div>
+
+
                         <!-- COMPANY NAME -->
 
                         <div class="form-group">
 
-
-                            <label>
-                                Company Name *
+                            <label for="company_name">
+                                Company / Organization Name *
                             </label>
-
 
                             <input
                                 type="text"
                                 name="company_name"
-                                required
-
+                                id="company_name"
                                 value="<?= htmlspecialchars(
-                                    $employer[
-                                        "company_name"
-                                    ]
+                                    $employer["company_name"]
                                     ?? ""
                                 ) ?>"
+                                required
                             >
-
 
                         </div>
 
@@ -1901,25 +1149,20 @@ input[type="file"] {
 
                         <div class="form-group">
 
-
-                            <label>
+                            <label for="contact_person">
                                 Contact Person *
                             </label>
-
 
                             <input
                                 type="text"
                                 name="contact_person"
-                                required
-
+                                id="contact_person"
                                 value="<?= htmlspecialchars(
-                                    $employer[
-                                        "contact_person"
-                                    ]
+                                    $employer["contact_person"]
                                     ?? ""
                                 ) ?>"
+                                required
                             >
-
 
                         </div>
 
@@ -1928,26 +1171,20 @@ input[type="file"] {
 
                         <div class="form-group">
 
-
-                            <label>
+                            <label for="contact_number">
                                 Contact Number
                             </label>
-
 
                             <input
                                 type="tel"
                                 name="contact_number"
-
+                                id="contact_number"
                                 placeholder="09XXXXXXXXX"
-
                                 value="<?= htmlspecialchars(
-                                    $employer[
-                                        "contact_number"
-                                    ]
+                                    $employer["contact_number"]
                                     ?? ""
                                 ) ?>"
                             >
-
 
                         </div>
 
@@ -1956,235 +1193,173 @@ input[type="file"] {
 
                         <div class="form-group full">
 
-
-                            <label>
-                                Company Description
+                            <label for="company_description">
+                                Company / Organization Description
                             </label>
-
 
                             <textarea
                                 name="company_description"
-                                placeholder="Tell job seekers about your company..."
+                                id="company_description"
+                                placeholder="Tell job seekers about your company or organization..."
                             ><?= htmlspecialchars(
-                                $employer[
-                                    "company_description"
-                                ]
+                                $employer["company_description"]
                                 ?? ""
                             ) ?></textarea>
 
-
                         </div>
 
-
                     </div>
-
 
                 </div>
 
 
-                <!-- =================================================
-                     BUSINESS LOCATION
-                ================================================== -->
+                <!-- LOCATION -->
 
                 <div class="card">
 
-
                     <h2>
-                        Business Location
+                        Business / Organization Location
                     </h2>
 
-
                     <p class="card-description">
-
-                        Enter your business address
-                        and barangay, then use your
-                        current location to save the
-                        exact coordinates of your business.
-
+                        Set the exact location of your company
+                        or organization in Caloocan City.
                     </p>
 
 
-                    <!-- ADDRESS -->
-
                     <div class="form-group">
 
-
-                        <label>
+                        <label for="address">
                             Complete Address *
                         </label>
 
-
                         <textarea
                             name="address"
+                            id="address"
                             required
-                            placeholder="House / Building No., Street, Barangay, Caloocan City"
+                            placeholder="Building No., Street, Barangay, Caloocan City"
                         ><?= htmlspecialchars(
-                            $employer[
-                                "address"
-                            ]
+                            $employer["address"]
                             ?? ""
                         ) ?></textarea>
-
 
                     </div>
 
 
-                    <!-- BARANGAY -->
-
                     <div class="form-group">
 
-
-                        <label>
+                        <label for="barangay">
                             Barangay *
                         </label>
-
 
                         <input
                             type="text"
                             name="barangay"
                             id="barangay"
-                            required
-
                             placeholder="Example: Barangay 176"
-
-                            oninput="detectCaloocanArea()"
-
                             value="<?= htmlspecialchars(
-                                $employer[
-                                    "barangay"
-                                ]
+                                $employer["barangay"]
                                 ?? ""
                             ) ?>"
+                            oninput="detectCaloocanArea()"
+                            required
                         >
-
-
-                        <!-- NORTH/SOUTH RESULT -->
 
                         <div
                             id="areaResult"
                             class="location-status"
-
-                            style="
-                                display:none;
-                                margin-top:10px;
-                            "
+                            style="display:none;"
                         ></div>
-
 
                     </div>
 
 
-                    <!-- =================================================
-                         CURRENT LOCATION BUTTON
-                    ================================================== -->
-
                     <button
                         type="button"
                         class="btn"
-                        id="locationButton"
                         onclick="getCurrentLocation()"
                     >
-
                         Use My Current Location
-
                     </button>
 
-
-                    <!-- =================================================
-                         LOCATION MESSAGE
-                    ================================================== -->
 
                     <div
                         id="locationStatus"
                         class="location-status"
                     >
-
                         Click "Use My Current Location"
-                        to save your exact business location.
-
+                        to detect your current location.
                     </div>
 
-
-                    <!-- =================================================
-                         HIDDEN LATITUDE
-                    ================================================== -->
 
                     <input
                         type="hidden"
                         name="latitude"
                         id="latitude"
-
                         value="<?= htmlspecialchars(
-                            $employer[
-                                "latitude"
-                            ]
+                            $employer["latitude"]
                             ?? ""
                         ) ?>"
                     >
-
-
-                    <!-- =================================================
-                         HIDDEN LONGITUDE
-                    ================================================== -->
 
                     <input
                         type="hidden"
                         name="longitude"
                         id="longitude"
-
                         value="<?= htmlspecialchars(
-                            $employer[
-                                "longitude"
-                            ]
+                            $employer["longitude"]
                             ?? ""
                         ) ?>"
                     >
 
 
+                    <iframe
+                        id="map"
+                        loading="lazy"
+                        allowfullscreen
+                    ></iframe>
+
                 </div>
 
 
-                <!-- =================================================
-                     VERIFICATION DOCUMENTS
-                ================================================== -->
+                <!-- VERIFICATION DOCUMENTS -->
 
                 <div class="card">
-
 
                     <h2>
                         Verification Documents
                     </h2>
 
-
                     <p class="card-description">
 
-                        Submit proof that you or
-                        your business is located
-                        in Caloocan City.
+                        <?php if ($employerType === "lgu"): ?>
+
+                            Submit documents that allow the administrator
+                            to verify your LGU employer account and
+                            Caloocan location.
+
+                        <?php else: ?>
+
+                            Submit proof that you or your business
+                            is located in Caloocan City.
+
+                        <?php endif; ?>
 
                     </p>
 
 
-                    <!-- =================================================
-                         GOVERNMENT ID
-                    ================================================== -->
+                    <!-- GOVERNMENT ID -->
 
                     <div class="document">
 
-
                         <h3>
-                            Government ID
+                            Government ID *
                         </h3>
 
-
                         <p>
-
-                            Upload a valid
-                            government-issued ID showing
-                            your Caloocan address.
-
+                            Upload a valid government-issued ID
+                            for the authorized contact person.
                         </p>
-
 
                         <input
                             type="file"
@@ -2192,51 +1367,35 @@ input[type="file"] {
                             accept=".jpg,.jpeg,.png,.pdf"
                         >
 
-
                         <?php if (
                             !empty(
-                                $verification[
-                                    "government_id"
-                                ]
+                                $verification["government_id"]
                                 ?? ""
                             )
                         ): ?>
 
-
                             <div class="uploaded">
-
-                                ✓ Government ID
-                                already uploaded
-
+                                Government ID already uploaded
                             </div>
 
-
                         <?php endif; ?>
-
 
                     </div>
 
 
-                    <!-- =================================================
-                         BARANGAY CERTIFICATE
-                    ================================================== -->
+                    <!-- BARANGAY CERTIFICATE -->
 
                     <div class="document">
 
-
                         <h3>
-                            Barangay Certificate
+                            Barangay Certificate *
                         </h3>
 
-
                         <p>
-
-                            Upload a Barangay Certificate
-                            as proof of your
-                            Caloocan address.
-
+                            Upload a Barangay Certificate or
+                            supporting location document for
+                            the Caloocan address.
                         </p>
-
 
                         <input
                             type="file"
@@ -2244,49 +1403,56 @@ input[type="file"] {
                             accept=".jpg,.jpeg,.png,.pdf"
                         >
 
-
                         <?php if (
                             !empty(
-                                $verification[
-                                    "barangay_certificate"
-                                ]
+                                $verification["barangay_certificate"]
                                 ?? ""
                             )
                         ): ?>
 
-
                             <div class="uploaded">
-
-                                ✓ Barangay Certificate
-                                already uploaded
-
+                                Barangay Certificate already uploaded
                             </div>
 
-
                         <?php endif; ?>
-
 
                     </div>
 
 
-                    <!-- =================================================
-                         BUSINESS PERMIT
-                    ================================================== -->
+                    <!-- BUSINESS PERMIT -->
 
                     <div class="document">
 
-
                         <h3>
-                            Business Permit
+
+                            <?php if ($employerType === "lgu"): ?>
+
+                                Business Permit
+
+                            <?php else: ?>
+
+                                Business Permit *
+
+                            <?php endif; ?>
+
                         </h3>
 
 
-                        <p>
+                        <?php if ($employerType === "lgu"): ?>
 
-                            Required for companies
-                            or registered businesses.
+                            <p>
+                                Business Permit is not required
+                                for an LGU employer account.
+                            </p>
 
-                        </p>
+                        <?php else: ?>
+
+                            <p>
+                                Required for Private Employer
+                                companies or registered businesses.
+                            </p>
+
+                        <?php endif; ?>
 
 
                         <input
@@ -2298,24 +1464,16 @@ input[type="file"] {
 
                         <?php if (
                             !empty(
-                                $verification[
-                                    "business_permit"
-                                ]
+                                $verification["business_permit"]
                                 ?? ""
                             )
                         ): ?>
 
-
                             <div class="uploaded">
-
-                                ✓ Business Permit
-                                already uploaded
-
+                                Business Permit already uploaded
                             </div>
 
-
                         <?php endif; ?>
-
 
                     </div>
 
@@ -2323,558 +1481,387 @@ input[type="file"] {
                     <div class="verification-note">
 
                         Accepted formats:
-                        JPG, PNG and PDF.
+                        JPG, PNG, and PDF.
 
                         <br>
 
                         Maximum file size:
                         5MB per document.
 
+                        <?php if ($employerType === "lgu"): ?>
+
+                            <br><br>
+
+                            Your LGU classification will still
+                            be reviewed by the administrator
+                            before your employer account is approved.
+
+                        <?php endif; ?>
+
                     </div>
 
-
                 </div>
-
 
             </div>
 
 
-            <!-- =================================================
-                 RIGHT COLUMN
-            ================================================== -->
+            <!-- RIGHT COLUMN -->
 
             <div>
 
 
-                <!-- =================================================
-                     LOCATION SUMMARY
-                ================================================== -->
+                <!-- EMPLOYER ACCOUNT TYPE -->
 
                 <div class="card">
 
+                    <h2>
+                        Employer Account
+                    </h2>
+
+                    <div class="status-item">
+
+                        <div class="status-item-label">
+                            Employer Type
+                        </div>
+
+                        <strong>
+                            <?= htmlspecialchars(
+                                $employerTypeLabel
+                            ) ?>
+                        </strong>
+
+                    </div>
+
+
+                    <div class="status-item">
+
+                        <div class="status-item-label">
+                            Job Source After Approval
+                        </div>
+
+                        <strong>
+
+                            <?= $employerType === "lgu"
+                                ? "LGU"
+                                : "Private Employer"
+                            ?>
+
+                        </strong>
+
+                    </div>
+
+                </div>
+
+
+                <!-- LOCATION SUMMARY -->
+
+                <div class="card">
 
                     <h2>
                         Location Summary
                     </h2>
 
-
-                    <!-- BARANGAY -->
-
                     <div class="status-item">
-
 
                         <div class="status-item-label">
                             Barangay
                         </div>
 
-
                         <strong>
-
                             <?= htmlspecialchars(
-                                $employer[
-                                    "barangay"
-                                ]
+                                $employer["barangay"]
                                 ?: "Not set"
                             ) ?>
-
                         </strong>
-
 
                     </div>
 
 
-                    <!-- AREA -->
-
                     <div class="status-item">
-
 
                         <div class="status-item-label">
                             Caloocan Area
                         </div>
 
-
                         <?php if (
                             !empty(
-                                $employer[
-                                    "caloocan_area"
-                                ]
+                                $employer["caloocan_area"]
                             )
                         ): ?>
 
-
-                            <span
-                                class="
-                                    status
-                                    approved-status
-                                "
-                            >
+                            <span class="status approved-status">
 
                                 <?= strtoupper(
                                     htmlspecialchars(
-                                        $employer[
-                                            "caloocan_area"
-                                        ]
+                                        $employer["caloocan_area"]
                                     )
                                 ) ?>
-
                                 CALOOCAN
 
                             </span>
 
-
                         <?php else: ?>
 
-
-                            <span
-                                class="
-                                    status
-                                    unverified-status
-                                "
-                            >
-
+                            <span class="status unverified-status">
                                 Not Detected
-
                             </span>
-
 
                         <?php endif; ?>
 
-
                     </div>
-
-
-                    <!-- COORDINATE STATUS -->
-
-                    <div class="status-item">
-
-
-                        <div class="status-item-label">
-                            Exact Location
-                        </div>
-
-
-                        <?php if (
-                            !empty(
-                                $employer[
-                                    "latitude"
-                                ]
-                            )
-                            &&
-                            !empty(
-                                $employer[
-                                    "longitude"
-                                ]
-                            )
-                        ): ?>
-
-
-                            <span
-                                class="
-                                    status
-                                    approved-status
-                                "
-                            >
-
-                                Location Saved
-
-                            </span>
-
-
-                        <?php else: ?>
-
-
-                            <span
-                                class="
-                                    status
-                                    unverified-status
-                                "
-                            >
-
-                                Not Set
-
-                            </span>
-
-
-                        <?php endif; ?>
-
-
-                    </div>
-
 
                 </div>
 
 
-                <!-- =================================================
-                     VERIFICATION STATUS
-                ================================================== -->
+                <!-- VERIFICATION STATUS -->
 
                 <div class="card">
-
 
                     <h2>
                         Verification Status
                     </h2>
 
 
-                    <?php
-
-                    $documentStatus =
-                        $verification[
-                            "document_status"
-                        ]
-                        ?? "unverified";
-
-
-                    $locationStatus =
-                        $verification[
-                            "location_status"
-                        ]
-                        ?? "unverified";
-
-
-                    $adminStatus =
-                        $verification[
-                            "admin_status"
-                        ]
-                        ?? "unverified";
-
-
-                    $accountStatus =
-                        $employer[
-                            "verification_status"
-                        ]
-                        ?? "unverified";
-
-                    ?>
-
-
-                    <!-- DOCUMENT STATUS -->
-
                     <div class="status-item">
-
 
                         <div class="status-item-label">
                             Documents
                         </div>
 
-
                         <span
-                            class="
-                                status
-                                <?= verificationStatusClass(
-                                    $documentStatus
-                                ) ?>
-                            "
+                            class="status <?= verificationStatusClass(
+                                $documentStatus
+                            ) ?>"
                         >
-
                             <?= htmlspecialchars(
                                 verificationStatusLabel(
                                     $documentStatus
                                 )
                             ) ?>
-
                         </span>
-
 
                     </div>
 
 
-                    <!-- LOCATION STATUS -->
-
                     <div class="status-item">
-
 
                         <div class="status-item-label">
                             Location
                         </div>
 
-
                         <span
-                            class="
-                                status
-                                <?= verificationStatusClass(
-                                    $locationStatus
-                                ) ?>
-                            "
+                            class="status <?= verificationStatusClass(
+                                $locationVerificationStatus
+                            ) ?>"
                         >
-
                             <?= htmlspecialchars(
                                 verificationStatusLabel(
-                                    $locationStatus
+                                    $locationVerificationStatus
                                 )
                             ) ?>
-
                         </span>
-
 
                     </div>
 
 
-                    <!-- ADMIN STATUS -->
-
                     <div class="status-item">
-
 
                         <div class="status-item-label">
                             Admin Approval
                         </div>
 
-
                         <span
-                            class="
-                                status
-                                <?= verificationStatusClass(
-                                    $adminStatus
-                                ) ?>
-                            "
+                            class="status <?= verificationStatusClass(
+                                $adminStatus
+                            ) ?>"
                         >
-
                             <?= htmlspecialchars(
                                 verificationStatusLabel(
                                     $adminStatus
                                 )
                             ) ?>
-
                         </span>
-
 
                     </div>
 
 
-                    <!-- ACCOUNT -->
-
                     <div class="status-item">
-
 
                         <div class="status-item-label">
                             Employer Account
                         </div>
 
-
                         <span
-                            class="
-                                status
-                                <?= verificationStatusClass(
-                                    $accountStatus
-                                ) ?>
-                            "
+                            class="status <?= verificationStatusClass(
+                                $accountStatus
+                            ) ?>"
                         >
-
                             <?= htmlspecialchars(
                                 verificationStatusLabel(
                                     $accountStatus
                                 )
                             ) ?>
-
                         </span>
-
 
                     </div>
 
 
+                    <?php if ($adminNotes !== ""): ?>
+
+                        <div class="admin-note">
+
+                            <strong>
+                                Admin Notes
+                            </strong>
+
+                            <br>
+
+                            <?= nl2br(
+                                htmlspecialchars(
+                                    $adminNotes
+                                )
+                            ) ?>
+
+                        </div>
+
+                    <?php endif; ?>
+
                 </div>
 
 
-                <!-- =================================================
-                     VERIFICATION PROCESS
-                ================================================== -->
+                <!-- VERIFICATION REQUIREMENTS -->
 
                 <div class="card">
-
 
                     <h2>
                         Verification Process
                     </h2>
 
+                    <div class="verification-note">
 
-                    <div class="company-info">
-
-
-                        <p>
-
-                            <strong>
-                                1. Documents
-                            </strong>
-
-                        </p>
-
-
-                        <p>
-
-                            Government ID,
-                            Barangay Certificate,
-                            and Business Permit.
-
-                        </p>
-
+                        <strong>
+                            1. Documents
+                        </strong>
 
                         <br>
 
+                        Government ID and
+                        Barangay Certificate.
 
-                        <p>
+                        <?php if ($employerType === "private"): ?>
 
-                            <strong>
-                                2. Location
-                            </strong>
+                            Business Permit is also required
+                            for Private Employers.
 
-                        </p>
+                        <?php endif; ?>
 
 
-                        <p>
+                        <br><br>
 
-                            Your business location
-                            must be inside
-                            Caloocan City.
 
-                        </p>
-
+                        <strong>
+                            2. Location
+                        </strong>
 
                         <br>
 
-
-                        <p>
-
-                            <strong>
-                                3. Admin Review
-                            </strong>
-
-                        </p>
+                        Your company or organization
+                        location must be inside
+                        Caloocan City.
 
 
-                        <p>
+                        <br><br>
 
-                            An administrator will review
-                            the submitted information
-                            before your account is
-                            fully verified.
 
-                        </p>
+                        <strong>
+                            3. Employer Type
+                        </strong>
 
+                        <br>
+
+                        The administrator will verify
+                        whether the account is a
+                        Private Employer or LGU employer.
+
+
+                        <br><br>
+
+
+                        <strong>
+                            4. Admin Review
+                        </strong>
+
+                        <br>
+
+                        Job posting access is enabled
+                        only after the employer account
+                        has been approved.
 
                     </div>
-
 
                 </div>
 
 
-                <!-- =================================================
-                     SAVE
-                ================================================== -->
+                <!-- SAVE -->
 
                 <div class="card">
-
 
                     <h2>
                         Save Profile
                     </h2>
 
-
                     <p class="card-description">
-
-                        Save your profile and
-                        submit the information
-                        for verification.
-
+                        Saving your profile submits
+                        the information for administrator
+                        verification.
                     </p>
-
 
                     <button
                         type="submit"
                         class="btn"
                     >
-
                         Save & Submit
-
                     </button>
-
 
                 </div>
 
-
             </div>
-
 
         </div>
 
-
     </form>
-
 
 </div>
 
 
 <script>
 
-
 /*
 |--------------------------------------------------------------------------
-| LIVE NORTH / SOUTH CALOOCAN DETECTION
+| NORTH / SOUTH CALOOCAN DETECTION
 |--------------------------------------------------------------------------
 */
 
-function detectCaloocanArea()
-{
-
+function detectCaloocanArea() {
     const barangay =
-        document.getElementById(
-            "barangay"
-        );
-
+        document.getElementById("barangay");
 
     const result =
-        document.getElementById(
-            "areaResult"
-        );
+        document.getElementById("areaResult");
 
-
-    if (
-        !barangay ||
-        !result
-    ) {
-
+    if (!barangay || !result) {
         return;
     }
-
 
     const value =
         barangay.value.trim();
 
-
-    /*
-    |--------------------------------------------------------------------------
-    | GET BARANGAY NUMBER
-    |--------------------------------------------------------------------------
-    |
-    | Examples accepted:
-    |
-    | Barangay 7
-    | Brgy 176
-    | Brgy. 176
-    | 176
-    |
-    */
-
     const match =
-        value.match(
-            /\d+/
-        );
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | NO NUMBER
-    |--------------------------------------------------------------------------
-    */
+        value.match(/\d+/);
 
     if (!match) {
-
-        result.style.display =
-            "none";
-
-
-        result.innerHTML =
-            "";
-
+        result.style.display = "none";
+        result.innerHTML = "";
 
         result.classList.remove(
             "area-south",
@@ -2882,342 +1869,193 @@ function detectCaloocanArea()
             "area-invalid"
         );
 
-
         return;
     }
 
-
     const barangayNumber =
-        parseInt(
-            match[0],
-            10
-        );
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | SOUTH CALOOCAN
-    |--------------------------------------------------------------------------
-    */
+        parseInt(match[0], 10);
 
     if (
         barangayNumber >= 1 &&
         barangayNumber <= 164
     ) {
-
-        result.style.display =
-            "block";
-
+        result.style.display = "block";
 
         result.classList.remove(
             "area-north",
             "area-invalid"
         );
 
-
         result.classList.add(
             "area-south"
         );
 
-
         result.innerHTML =
-            "✓ Detected Area: "
-            + "<strong>SOUTH CALOOCAN</strong>";
-
+            "Detected Area: <strong>SOUTH CALOOCAN</strong>";
 
         return;
     }
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | NORTH CALOOCAN
-    |--------------------------------------------------------------------------
-    */
 
     if (
         barangayNumber >= 165 &&
         barangayNumber <= 188
     ) {
-
-        result.style.display =
-            "block";
-
+        result.style.display = "block";
 
         result.classList.remove(
             "area-south",
             "area-invalid"
         );
 
-
         result.classList.add(
             "area-north"
         );
 
-
         result.innerHTML =
-            "✓ Detected Area: "
-            + "<strong>NORTH CALOOCAN</strong>";
-
+            "Detected Area: <strong>NORTH CALOOCAN</strong>";
 
         return;
     }
 
-
-    /*
-    |--------------------------------------------------------------------------
-    | INVALID
-    |--------------------------------------------------------------------------
-    */
-
-    result.style.display =
-        "block";
-
+    result.style.display = "block";
 
     result.classList.remove(
         "area-south",
         "area-north"
     );
 
-
     result.classList.add(
         "area-invalid"
     );
 
-
     result.innerHTML =
-        "⚠ Please enter a valid Caloocan "
-        + "barangay number from 1 to 188.";
+        "Please enter a valid Caloocan barangay number from 1 to 188.";
 }
 
 
 /*
 |--------------------------------------------------------------------------
-| GET CURRENT LOCATION
+| CURRENT LOCATION
 |--------------------------------------------------------------------------
-|
-| No map is displayed.
-|
-| The GPS coordinates are saved inside hidden form fields.
-|
 */
 
-function getCurrentLocation()
-{
-
+function getCurrentLocation() {
     const status =
         document.getElementById(
             "locationStatus"
         );
 
-
-    const button =
-        document.getElementById(
-            "locationButton"
-        );
-
-
-    const latitudeInput =
-        document.getElementById(
-            "latitude"
-        );
-
-
-    const longitudeInput =
-        document.getElementById(
-            "longitude"
-        );
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | GEOLOCATION SUPPORT
-    |--------------------------------------------------------------------------
-    */
-
-    if (
-        !navigator.geolocation
-    ) {
-
+    if (!navigator.geolocation) {
         status.innerHTML =
-            "⚠ Geolocation is not supported "
-            + "by your browser.";
-
+            "Geolocation is not supported by your browser.";
 
         return;
     }
 
-
-    /*
-    |--------------------------------------------------------------------------
-    | LOADING
-    |--------------------------------------------------------------------------
-    */
-
-    button.disabled =
-        true;
-
-
-    button.innerHTML =
-        "Getting Location...";
-
-
     status.innerHTML =
-        "Detecting your exact business location...";
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | GET CURRENT POSITION
-    |--------------------------------------------------------------------------
-    */
+        "Getting your current location...";
 
     navigator.geolocation.getCurrentPosition(
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | SUCCESS
-        |--------------------------------------------------------------------------
-        */
-
-        function(position)
-        {
-
+        function (position) {
             const latitude =
                 position.coords.latitude;
-
 
             const longitude =
                 position.coords.longitude;
 
+            document.getElementById(
+                "latitude"
+            ).value = latitude;
 
-            /*
-            |--------------------------------------------------------------------------
-            | SAVE TO HIDDEN INPUTS
-            |--------------------------------------------------------------------------
-            */
-
-            latitudeInput.value =
-                latitude.toFixed(8);
-
-
-            longitudeInput.value =
-                longitude.toFixed(8);
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | MESSAGE
-            |--------------------------------------------------------------------------
-            */
+            document.getElementById(
+                "longitude"
+            ).value = longitude;
 
             status.innerHTML =
-                "✓ Business location detected successfully. "
-                + "Click Save & Submit to save your location.";
+                "Current location detected successfully.";
 
-
-            button.disabled =
-                false;
-
-
-            button.innerHTML =
-                "Update Current Location";
-
+            showMap(
+                latitude,
+                longitude
+            );
         },
 
-
-        /*
-        |--------------------------------------------------------------------------
-        | ERROR
-        |--------------------------------------------------------------------------
-        */
-
-        function(error)
-        {
-
-            button.disabled =
-                false;
-
-
-            button.innerHTML =
-                "Use My Current Location";
-
-
-            switch (
-                error.code
-            ) {
-
-
+        function (error) {
+            switch (error.code) {
                 case error.PERMISSION_DENIED:
-
-
                     status.innerHTML =
-                        "⚠ Location permission was denied. "
-                        + "Please allow location access "
-                        + "in your browser.";
-
-
+                        "Location permission was denied. Please allow location access.";
                     break;
-
 
                 case error.POSITION_UNAVAILABLE:
-
-
                     status.innerHTML =
-                        "⚠ Your current location "
-                        + "is unavailable.";
-
-
+                        "Your current location is unavailable.";
                     break;
-
 
                 case error.TIMEOUT:
-
-
                     status.innerHTML =
-                        "⚠ Location request timed out. "
-                        + "Please try again.";
-
-
+                        "Location request timed out. Please try again.";
                     break;
 
-
                 default:
-
-
                     status.innerHTML =
-                        "⚠ Unable to detect "
-                        + "your current location.";
-
+                        "Unable to get your current location.";
             }
-
         },
 
-
-        /*
-        |--------------------------------------------------------------------------
-        | OPTIONS
-        |--------------------------------------------------------------------------
-        */
-
         {
-
-            enableHighAccuracy:
-                true,
-
-
-            timeout:
-                15000,
-
-
-            maximumAge:
-                0
-
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 0
         }
-
     );
+}
 
+
+/*
+|--------------------------------------------------------------------------
+| MAP
+|--------------------------------------------------------------------------
+*/
+
+function showMap(latitude, longitude) {
+    const map =
+        document.getElementById("map");
+
+    if (!map) {
+        return;
+    }
+
+    const delta = 0.008;
+
+    const minLongitude =
+        parseFloat(longitude) - delta;
+
+    const minLatitude =
+        parseFloat(latitude) - delta;
+
+    const maxLongitude =
+        parseFloat(longitude) + delta;
+
+    const maxLatitude =
+        parseFloat(latitude) + delta;
+
+    const bbox = [
+        minLongitude,
+        minLatitude,
+        maxLongitude,
+        maxLatitude
+    ].join(",");
+
+    map.src =
+        "https://www.openstreetmap.org/export/embed.html"
+        + "?bbox="
+        + encodeURIComponent(bbox)
+        + "&layer=mapnik"
+        + "&marker="
+        + encodeURIComponent(latitude)
+        + "%2C"
+        + encodeURIComponent(longitude);
 }
 
 
@@ -3229,68 +2067,37 @@ function getCurrentLocation()
 
 document.addEventListener(
     "DOMContentLoaded",
-    function()
-    {
-
-        /*
-        |--------------------------------------------------------------------------
-        | SHOW SAVED NORTH / SOUTH
-        |--------------------------------------------------------------------------
-        */
-
+    function () {
         detectCaloocanArea();
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | CHECK SAVED LOCATION
-        |--------------------------------------------------------------------------
-        */
 
         const savedLatitude =
             document.getElementById(
                 "latitude"
             ).value;
 
-
         const savedLongitude =
             document.getElementById(
                 "longitude"
             ).value;
 
-
-        /*
-        |--------------------------------------------------------------------------
-        | LOCATION ALREADY SAVED
-        |--------------------------------------------------------------------------
-        */
-
         if (
             savedLatitude !== "" &&
             savedLongitude !== ""
         ) {
+            showMap(
+                savedLatitude,
+                savedLongitude
+            );
 
             document.getElementById(
                 "locationStatus"
             ).innerHTML =
-                "✓ Exact business location "
-                + "has already been saved.";
-
-
-            document.getElementById(
-                "locationButton"
-            ).innerHTML =
-                "Update Current Location";
-
+                "Saved business / organization location loaded.";
         }
-
     }
 );
 
-
 </script>
 
-
 </body>
-
 </html>

@@ -3,40 +3,25 @@
 session_start();
 
 require_once "../config/database.php";
-
-
-/*
-|--------------------------------------------------------------------------
-| AUTH CHECK
-|--------------------------------------------------------------------------
-*/
+require_once "../utilities/NotificationService.php";
 
 if (
     !isset($_SESSION["user_id"]) ||
-    $_SESSION["role"] !== "admin"
+    ($_SESSION["role"] ?? "") !== "admin"
 ) {
     header("Location: ../login.php");
     exit;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| GET EMPLOYER ID
-|--------------------------------------------------------------------------
-*/
-
 $employerId =
     isset($_GET["id"])
-    ? (int) $_GET["id"]
-    : 0;
-
+        ? (int) $_GET["id"]
+        : 0;
 
 if ($employerId <= 0) {
     header("Location: employers.php");
     exit;
 }
-
 
 $success = "";
 $error = "";
@@ -44,14 +29,71 @@ $error = "";
 
 /*
 |--------------------------------------------------------------------------
-| HANDLE ADMIN ACTIONS
+| GET EMPLOYER
 |--------------------------------------------------------------------------
 */
 
-if ($_SERVER["REQUEST_METHOD"] === "POST") {
+$stmt = $pdo->prepare("
+    SELECT
+        e.*,
+        u.email,
+        u.is_active
+    FROM employers e
+    INNER JOIN users u
+        ON e.user_id = u.id
+    WHERE e.id = ?
+    LIMIT 1
+");
 
+$stmt->execute([$employerId]);
+
+$employer =
+    $stmt->fetch(PDO::FETCH_ASSOC);
+
+if (!$employer) {
+    die("Employer not found.");
+}
+
+$employerUserId =
+    (int) $employer["user_id"];
+
+$employerType =
+    $employer["employer_type"]
+    ?? "private";
+
+
+/*
+|--------------------------------------------------------------------------
+| VERIFICATION
+|--------------------------------------------------------------------------
+*/
+
+$stmt = $pdo->prepare("
+    SELECT *
+    FROM employer_verifications
+    WHERE employer_id = ?
+    LIMIT 1
+");
+
+$stmt->execute([$employerId]);
+
+$verification =
+    $stmt->fetch(PDO::FETCH_ASSOC);
+
+
+/*
+|--------------------------------------------------------------------------
+| ACTION
+|--------------------------------------------------------------------------
+*/
+
+if (
+    $_SERVER["REQUEST_METHOD"]
+    === "POST"
+) {
     $action =
-        $_POST["action"] ?? "";
+        $_POST["action"]
+        ?? "";
 
     $adminNotes =
         trim(
@@ -59,17 +101,15 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             ?? ""
         );
 
-
     try {
+        if (!$verification) {
+            throw new Exception(
+                "Verification record not found."
+            );
+        }
 
-        /*
-        |--------------------------------------------------------------------------
-        | SAVE ADMIN NOTES
-        |--------------------------------------------------------------------------
-        */
 
         if ($action === "save_notes") {
-
             $stmt = $pdo->prepare("
                 UPDATE employer_verifications
                 SET admin_notes = ?
@@ -82,17 +122,45 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             ]);
 
             $success =
-                "Admin notes saved successfully.";
+                "Admin notes saved.";
         }
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | APPROVE DOCUMENTS
-        |--------------------------------------------------------------------------
-        */
+        elseif (
+            $action === "approve_documents"
+        ) {
+            if (
+                empty(
+                    $verification["government_id"]
+                )
+            ) {
+                throw new Exception(
+                    "Government ID is missing."
+                );
+            }
 
-        elseif ($action === "approve_documents") {
+            if (
+                empty(
+                    $verification[
+                        "barangay_certificate"
+                    ]
+                )
+            ) {
+                throw new Exception(
+                    "Barangay Certificate is missing."
+                );
+            }
+
+            if (
+                $employerType === "private" &&
+                empty(
+                    $verification["business_permit"]
+                )
+            ) {
+                throw new Exception(
+                    "Business Permit is required for Private Employers."
+                );
+            }
 
             $stmt = $pdo->prepare("
                 UPDATE employer_verifications
@@ -107,25 +175,28 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $employerId
             ]);
 
+            NotificationService::create(
+                $pdo,
+                $employerUserId,
+                "Verification Documents Approved",
+                "Your verification documents have been approved.",
+                "verification_documents",
+                $employerId
+            );
+
             $success =
                 "Verification documents approved.";
         }
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | REJECT DOCUMENTS
-        |--------------------------------------------------------------------------
-        */
-
-        elseif ($action === "reject_documents") {
-
+        elseif (
+            $action === "reject_documents"
+        ) {
             if ($adminNotes === "") {
                 throw new Exception(
-                    "Please add an admin note explaining why the documents were rejected."
+                    "Please provide a rejection reason."
                 );
             }
-
 
             $stmt = $pdo->prepare("
                 UPDATE employer_verifications
@@ -140,18 +211,33 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $employerId
             ]);
 
+            NotificationService::create(
+                $pdo,
+                $employerUserId,
+                "Verification Documents Rejected",
+                "Your verification documents were rejected. Reason: "
+                    . $adminNotes,
+                "verification_documents",
+                $employerId
+            );
+
             $success =
                 "Verification documents rejected.";
         }
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | APPROVE LOCATION
-        |--------------------------------------------------------------------------
-        */
-
-        elseif ($action === "approve_location") {
+        elseif (
+            $action === "approve_location"
+        ) {
+            if (
+                empty($employer["address"]) ||
+                empty($employer["barangay"]) ||
+                empty($employer["caloocan_area"])
+            ) {
+                throw new Exception(
+                    "Employer location is incomplete."
+                );
+            }
 
             $stmt = $pdo->prepare("
                 UPDATE employer_verifications
@@ -166,25 +252,28 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $employerId
             ]);
 
+            NotificationService::create(
+                $pdo,
+                $employerUserId,
+                "Employer Location Approved",
+                "Your employer location has been approved.",
+                "verification_location",
+                $employerId
+            );
+
             $success =
                 "Employer location approved.";
         }
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | REJECT LOCATION
-        |--------------------------------------------------------------------------
-        */
-
-        elseif ($action === "reject_location") {
-
+        elseif (
+            $action === "reject_location"
+        ) {
             if ($adminNotes === "") {
                 throw new Exception(
-                    "Please add an admin note explaining why the location was rejected."
+                    "Please provide a rejection reason."
                 );
             }
-
 
             $stmt = $pdo->prepare("
                 UPDATE employer_verifications
@@ -199,77 +288,43 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $employerId
             ]);
 
+            NotificationService::create(
+                $pdo,
+                $employerUserId,
+                "Employer Location Rejected",
+                "Your employer location was rejected. Reason: "
+                    . $adminNotes,
+                "verification_location",
+                $employerId
+            );
+
             $success =
                 "Employer location rejected.";
         }
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | APPROVE EMPLOYER
-        |--------------------------------------------------------------------------
-        */
-
-        elseif ($action === "approve_employer") {
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | CHECK VERIFICATION
-            |--------------------------------------------------------------------------
-            */
-
-            $stmt = $pdo->prepare("
-                SELECT
-                    document_status,
-                    location_status
-                FROM employer_verifications
-                WHERE employer_id = ?
-                LIMIT 1
-            ");
-
-            $stmt->execute([
-                $employerId
-            ]);
-
-            $verificationCheck =
-                $stmt->fetch(
-                    PDO::FETCH_ASSOC
-                );
-
-
-            if (!$verificationCheck) {
-                throw new Exception(
-                    "Verification record not found."
-                );
-            }
-
-
+        elseif (
+            $action === "approve_employer"
+        ) {
             if (
-                $verificationCheck["document_status"]
+                $verification["document_status"]
                 !== "passed"
             ) {
                 throw new Exception(
-                    "Approve the employer documents first."
+                    "Approve the documents first."
                 );
             }
 
-
             if (
-                $verificationCheck["location_status"]
+                $verification["location_status"]
                 !== "passed"
             ) {
                 throw new Exception(
-                    "Approve the employer location first."
+                    "Approve the location first."
                 );
             }
 
-
-            /*
-            |--------------------------------------------------------------------------
-            | APPROVE ADMIN STATUS
-            |--------------------------------------------------------------------------
-            */
+            $pdo->beginTransaction();
 
             $stmt = $pdo->prepare("
                 UPDATE employer_verifications
@@ -284,43 +339,47 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $employerId
             ]);
 
-
-            /*
-            |--------------------------------------------------------------------------
-            | APPROVE EMPLOYER
-            |--------------------------------------------------------------------------
-            */
-
             $stmt = $pdo->prepare("
                 UPDATE employers
                 SET verification_status = 'approved'
                 WHERE id = ?
             ");
 
-            $stmt->execute([
-                $employerId
-            ]);
+            $stmt->execute([$employerId]);
 
+            $pdo->commit();
+
+            try {
+                NotificationService::create(
+                    $pdo,
+                    $employerUserId,
+                    "Employer Account Approved",
+                    "Your employer account has been verified and approved. You can now post jobs.",
+                    "employer_verification",
+                    $employerId
+                );
+            } catch (Throwable $e) {
+                error_log(
+                    "Employer notification error: "
+                    . $e->getMessage()
+                );
+            }
 
             $success =
                 "Employer successfully approved.";
         }
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | REJECT EMPLOYER
-        |--------------------------------------------------------------------------
-        */
-
-        elseif ($action === "reject_employer") {
-
+        elseif (
+            $action === "reject_employer"
+        ) {
             if ($adminNotes === "") {
                 throw new Exception(
-                    "Please add an admin note explaining why the employer was rejected."
+                    "Please provide a rejection reason."
                 );
             }
 
+            $pdo->beginTransaction();
 
             $stmt = $pdo->prepare("
                 UPDATE employer_verifications
@@ -335,141 +394,116 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $employerId
             ]);
 
-
             $stmt = $pdo->prepare("
                 UPDATE employers
                 SET verification_status = 'rejected'
                 WHERE id = ?
             ");
 
-            $stmt->execute([
-                $employerId
-            ]);
+            $stmt->execute([$employerId]);
 
+            $pdo->commit();
+
+            try {
+                NotificationService::create(
+                    $pdo,
+                    $employerUserId,
+                    "Employer Account Rejected",
+                    "Your employer verification was rejected. Reason: "
+                        . $adminNotes,
+                    "employer_verification",
+                    $employerId
+                );
+            } catch (Throwable $e) {
+                error_log(
+                    "Employer notification error: "
+                    . $e->getMessage()
+                );
+            }
 
             $success =
                 "Employer verification rejected.";
         }
 
+        else {
+            throw new Exception(
+                "Invalid action."
+            );
+        }
 
-    } catch (Exception $e) {
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
 
         $error =
             $e->getMessage();
     }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | RELOAD
+    |--------------------------------------------------------------------------
+    */
+
+    $stmt = $pdo->prepare("
+        SELECT
+            e.*,
+            u.email,
+            u.is_active
+        FROM employers e
+        INNER JOIN users u
+            ON e.user_id = u.id
+        WHERE e.id = ?
+        LIMIT 1
+    ");
+
+    $stmt->execute([$employerId]);
+
+    $employer =
+        $stmt->fetch(PDO::FETCH_ASSOC);
+
+    $employerType =
+        $employer["employer_type"]
+        ?? "private";
+
+    $stmt = $pdo->prepare("
+        SELECT *
+        FROM employer_verifications
+        WHERE employer_id = ?
+        LIMIT 1
+    ");
+
+    $stmt->execute([$employerId]);
+
+    $verification =
+        $stmt->fetch(PDO::FETCH_ASSOC);
 }
 
 
-/*
-|--------------------------------------------------------------------------
-| GET EMPLOYER
-|--------------------------------------------------------------------------
-*/
-
-$stmt = $pdo->prepare("
-    SELECT
-
-        e.*,
-
-        u.email,
-
-        u.is_active
-
-    FROM employers e
-
-    INNER JOIN users u
-        ON e.user_id = u.id
-
-    WHERE e.id = ?
-
-    LIMIT 1
-");
-
-
-$stmt->execute([
-    $employerId
-]);
-
-
-$employer =
-    $stmt->fetch(
-        PDO::FETCH_ASSOC
-    );
-
-
-if (!$employer) {
-    die("Employer not found.");
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| GET VERIFICATION DATA
-|--------------------------------------------------------------------------
-*/
-
-$stmt = $pdo->prepare("
-    SELECT *
-    FROM employer_verifications
-    WHERE employer_id = ?
-    LIMIT 1
-");
-
-
-$stmt->execute([
-    $employerId
-]);
-
-
-$verification =
-    $stmt->fetch(
-        PDO::FETCH_ASSOC
-    );
-
-
-/*
-|--------------------------------------------------------------------------
-| STATUS HELPERS
-|--------------------------------------------------------------------------
-*/
-
-function statusClass($status)
+function statusClass(?string $status): string
 {
+    return match ($status) {
+        "approved",
+        "passed" => "approved",
 
-    switch ($status) {
+        "pending",
+        "processing" => "pending",
 
-        case "approved":
-        case "passed":
-            return "approved";
+        "rejected",
+        "failed" => "rejected",
 
-
-        case "pending":
-        case "processing":
-            return "pending";
-
-
-        case "rejected":
-        case "failed":
-            return "rejected";
-
-
-        case "needs_review":
-            return "review";
-
-
-        default:
-            return "unverified";
-    }
+        default => "unverified"
+    };
 }
 
 
-function statusLabel($status)
+function statusLabel(?string $status): string
 {
-
     if (!$status) {
         return "Unverified";
     }
-
 
     return ucwords(
         str_replace(
@@ -481,1497 +515,359 @@ function statusLabel($status)
 }
 
 
-/*
-|--------------------------------------------------------------------------
-| DOCUMENT PREVIEW
-|--------------------------------------------------------------------------
-*/
-
 function documentPreview(
-    $filename,
-    $label
-) {
-
-    if (!$filename) {
-
-        echo '
-            <div class="document-missing">
-                No file uploaded
-            </div>
-        ';
-
+    ?string $file,
+    string $label
+): void {
+    if (!$file) {
+        echo '<div class="missing">No file uploaded.</div>';
         return;
     }
 
-
-    $fileUrl =
+    $url =
         "../uploads/verification/"
-        . rawurlencode($filename);
-
+        . rawurlencode($file);
 
     $extension =
         strtolower(
             pathinfo(
-                $filename,
+                $file,
                 PATHINFO_EXTENSION
             )
         );
 
-
-    /*
-    |--------------------------------------------------------------------------
-    | IMAGE
-    |--------------------------------------------------------------------------
-    */
-
     if (
         in_array(
             $extension,
-            [
-                "jpg",
-                "jpeg",
-                "png"
-            ],
+            ["jpg", "jpeg", "png"],
             true
         )
     ) {
-
-        echo '
-
-            <div class="document-preview">
-
-                <img
-                    src="' .
-                    htmlspecialchars($fileUrl) .
-                    '"
-                    alt="' .
-                    htmlspecialchars($label) .
-                    '"
-                >
-
-            </div>
-
-
-            <a
-                href="' .
-                htmlspecialchars($fileUrl) .
-                '"
-                target="_blank"
-                class="document-link"
-            >
-                Open Full Image
-            </a>
-
-        ';
-
+        echo '<img class="document-image" src="'
+            . htmlspecialchars($url)
+            . '" alt="'
+            . htmlspecialchars($label)
+            . '">';
+    } elseif ($extension === "pdf") {
+        echo '<iframe class="document-pdf" src="'
+            . htmlspecialchars($url)
+            . '"></iframe>';
     }
 
-
-    /*
-    |--------------------------------------------------------------------------
-    | PDF
-    |--------------------------------------------------------------------------
-    */
-
-    elseif ($extension === "pdf") {
-
-        echo '
-
-            <div class="pdf-preview">
-
-                <iframe
-                    src="' .
-                    htmlspecialchars($fileUrl) .
-                    '"
-                ></iframe>
-
-            </div>
-
-
-            <a
-                href="' .
-                htmlspecialchars($fileUrl) .
-                '"
-                target="_blank"
-                class="document-link"
-            >
-                Open PDF
-            </a>
-
-        ';
-
-    }
-
+    echo '<br><a class="document-link" target="_blank" href="'
+        . htmlspecialchars($url)
+        . '">Open Document</a>';
 }
 
 ?>
 
-
 <!DOCTYPE html>
-
 <html lang="en">
 
 <head>
 
 <meta charset="UTF-8">
-
-<meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0"
->
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <title>
     View Employer - Admin
 </title>
 
-
 <style>
 
 * {
     box-sizing: border-box;
-    margin: 0;
-    padding: 0;
 }
-
 
 body {
-
-    font-family:
-        Arial,
-        Helvetica,
-        sans-serif;
-
-    background:
-        #f5f7fb;
-
-    color:
-        #333;
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #f5f7fb;
+    color: #222;
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| NAVBAR
-|--------------------------------------------------------------------------
-*/
-
-.navbar {
-
-    background:
-        #111827;
-
-    padding:
-        18px 50px;
-}
-
-
-.navbar-container {
-
-    max-width:
-        1200px;
-
-    margin:
-        auto;
-
-    display:
-        flex;
-
-    justify-content:
-        space-between;
-
-    align-items:
-        center;
-}
-
-
-.logo {
-
-    color:
-        white;
-
-    text-decoration:
-        none;
-
-    font-size:
-        22px;
-
-    font-weight:
-        bold;
-}
-
-
-.nav-links {
-
-    display:
-        flex;
-
-    gap:
-        20px;
-
-    align-items:
-        center;
-}
-
-
-.nav-links a {
-
-    color:
-        white;
-
-    text-decoration:
-        none;
-
-    font-size:
-        14px;
-}
-
-
-.logout {
-
-    background:
-        #dc2626;
-
-    padding:
-        8px 14px;
-
-    border-radius:
-        5px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| CONTAINER
-|--------------------------------------------------------------------------
-*/
 
 .container {
-
-    max-width:
-        1200px;
-
-    margin:
-        40px auto;
-
-    padding:
-        0 20px;
+    max-width: 1200px;
+    margin: 35px auto;
+    padding: 0 20px 50px;
 }
-
-
-.page-header {
-
-    display:
-        flex;
-
-    justify-content:
-        space-between;
-
-    align-items:
-        center;
-
-    gap:
-        20px;
-
-    margin-bottom:
-        25px;
-}
-
-
-.page-header p {
-
-    color:
-        #666;
-
-    margin-top:
-        7px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| ALERT
-|--------------------------------------------------------------------------
-*/
-
-.alert {
-
-    padding:
-        14px 16px;
-
-    border-radius:
-        8px;
-
-    margin-bottom:
-        20px;
-}
-
-
-.alert-success {
-
-    background:
-        #dcfce7;
-
-    color:
-        #166534;
-}
-
-
-.alert-error {
-
-    background:
-        #fee2e2;
-
-    color:
-        #991b1b;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| GRID
-|--------------------------------------------------------------------------
-*/
 
 .grid {
-
-    display:
-        grid;
-
-    grid-template-columns:
-        2fr 1fr;
-
-    gap:
-        25px;
-
-    align-items:
-        start;
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 20px;
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| CARD
-|--------------------------------------------------------------------------
-*/
 
 .card {
-
-    background:
-        white;
-
-    padding:
-        25px;
-
-    border-radius:
-        10px;
-
-    box-shadow:
-        0 2px 10px
-        rgba(0,0,0,0.05);
-
-    margin-bottom:
-        20px;
+    padding: 23px;
+    margin-bottom: 20px;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 9px;
 }
 
-
-.card h2 {
-
-    margin-bottom:
-        20px;
+.info {
+    padding: 11px 0;
+    border-bottom: 1px solid #eee;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| INFO
-|--------------------------------------------------------------------------
-*/
-
-.info-row {
-
-    padding:
-        13px 0;
-
-    border-bottom:
-        1px solid #eee;
+.label {
+    color: #64748b;
+    font-size: 12px;
 }
 
-
-.info-row:last-child {
-
-    border-bottom:
-        none;
+.value {
+    margin-top: 4px;
 }
-
-
-.info-label {
-
-    color:
-        #666;
-
-    font-size:
-        13px;
-
-    margin-bottom:
-        5px;
-}
-
-
-.info-value {
-
-    font-size:
-        14px;
-
-    line-height:
-        1.5;
-
-    word-break:
-        break-word;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| STATUS
-|--------------------------------------------------------------------------
-*/
 
 .status {
-
-    display:
-        inline-block;
-
-    padding:
-        5px 10px;
-
-    border-radius:
-        15px;
-
-    font-size:
-        12px;
-
-    font-weight:
-        bold;
+    display: inline-block;
+    padding: 5px 9px;
+    border-radius: 15px;
+    font-size: 12px;
+    font-weight: bold;
 }
-
 
 .approved {
-
-    background:
-        #dcfce7;
-
-    color:
-        #166534;
+    background: #dcfce7;
+    color: #166534;
 }
-
 
 .pending {
-
-    background:
-        #fef3c7;
-
-    color:
-        #92400e;
+    background: #fef3c7;
+    color: #92400e;
 }
-
 
 .rejected {
-
-    background:
-        #fee2e2;
-
-    color:
-        #991b1b;
+    background: #fee2e2;
+    color: #991b1b;
 }
-
-
-.review {
-
-    background:
-        #dbeafe;
-
-    color:
-        #1e40af;
-}
-
 
 .unverified {
-
-    background:
-        #e5e7eb;
-
-    color:
-        #374151;
+    background: #e5e7eb;
+    color: #374151;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| AREA
-|--------------------------------------------------------------------------
-*/
-
-.area {
-
-    display:
-        inline-block;
-
-    padding:
-        5px 10px;
-
-    border-radius:
-        15px;
-
-    font-size:
-        12px;
-
-    font-weight:
-        bold;
+.document-image,
+.document-pdf {
+    width: 100%;
+    max-height: 400px;
+    border: 1px solid #ddd;
 }
 
-
-.north {
-
-    background:
-        #dbeafe;
-
-    color:
-        #1e40af;
+.document-pdf {
+    height: 350px;
 }
-
-
-.south {
-
-    background:
-        #dcfce7;
-
-    color:
-        #166534;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| DOCUMENT
-|--------------------------------------------------------------------------
-*/
-
-.document {
-
-    border:
-        1px solid #e5e7eb;
-
-    border-radius:
-        8px;
-
-    padding:
-        18px;
-
-    margin-bottom:
-        18px;
-}
-
-
-.document h3 {
-
-    margin-bottom:
-        15px;
-}
-
-
-.document-preview {
-
-    width:
-        100%;
-
-    max-height:
-        450px;
-
-    overflow:
-        auto;
-
-    background:
-        #f9fafb;
-
-    border-radius:
-        8px;
-
-    margin-bottom:
-        12px;
-}
-
-
-.document-preview img {
-
-    display:
-        block;
-
-    width:
-        100%;
-
-    height:
-        auto;
-
-    object-fit:
-        contain;
-}
-
-
-.pdf-preview {
-
-    height:
-        450px;
-
-    margin-bottom:
-        12px;
-}
-
-
-.pdf-preview iframe {
-
-    width:
-        100%;
-
-    height:
-        100%;
-
-    border:
-        1px solid #ddd;
-
-    border-radius:
-        8px;
-}
-
 
 .document-link {
-
-    display:
-        inline-block;
-
-    margin-top:
-        5px;
-
-    color:
-        #2563eb;
-
-    text-decoration:
-        none;
-
-    font-size:
-        14px;
+    color: #2563eb;
 }
 
-
-.document-missing {
-
-    color:
-        #991b1b;
-
-    background:
-        #fee2e2;
-
-    padding:
-        12px;
-
-    border-radius:
-        6px;
+.document {
+    margin-bottom: 25px;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| MAP
-|--------------------------------------------------------------------------
-*/
-
-#map {
-
-    width:
-        100%;
-
-    height:
-        350px;
-
-    border:
-        1px solid #ddd;
-
-    border-radius:
-        8px;
-
-    margin-top:
-        15px;
+textarea {
+    width: 100%;
+    min-height: 120px;
+    padding: 11px;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| ADMIN NOTES
-|--------------------------------------------------------------------------
-*/
-
-.admin-notes {
-
-    width:
-        100%;
-
-    min-height:
-        140px;
-
-    padding:
-        12px;
-
-    border:
-        1px solid #d1d5db;
-
-    border-radius:
-        6px;
-
-    resize:
-        vertical;
-
-    font-family:
-        Arial,
-        sans-serif;
-
-    font-size:
-        14px;
-
-    line-height:
-        1.5;
+.actions {
+    display: flex;
+    gap: 7px;
+    margin-top: 10px;
+    flex-wrap: wrap;
 }
-
-
-.admin-notes:focus {
-
-    outline:
-        none;
-
-    border-color:
-        #2563eb;
-}
-
-
-.note-help {
-
-    color:
-        #666;
-
-    font-size:
-        13px;
-
-    line-height:
-        1.5;
-
-    margin-bottom:
-        12px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| BUTTONS
-|--------------------------------------------------------------------------
-*/
 
 .btn {
-
-    display:
-        inline-block;
-
-    border:
-        none;
-
-    padding:
-        10px 15px;
-
-    border-radius:
-        6px;
-
-    cursor:
-        pointer;
-
-    color:
-        white;
-
-    text-decoration:
-        none;
-
-    font-size:
-        14px;
+    padding: 9px 12px;
+    border: none;
+    border-radius: 5px;
+    color: #ffffff;
+    cursor: pointer;
+    text-decoration: none;
 }
 
-
-.btn-blue {
-
-    background:
-        #2563eb;
+.blue {
+    background: #2563eb;
 }
 
-
-.btn-green {
-
-    background:
-        #16a34a;
+.green {
+    background: #16a34a;
 }
 
-
-.btn-red {
-
-    background:
-        #dc2626;
+.red {
+    background: #dc2626;
 }
 
-
-.btn-gray {
-
-    background:
-        #64748b;
+.gray {
+    background: #64748b;
 }
 
-
-.action-buttons {
-
-    display:
-        flex;
-
-    gap:
-        10px;
-
-    flex-wrap:
-        wrap;
-
-    margin-top:
-        20px;
+.alert {
+    padding: 14px;
+    margin-bottom: 15px;
+    border-radius: 7px;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| FINAL APPROVAL
-|--------------------------------------------------------------------------
-*/
-
-.final-approval {
-
-    border:
-        2px solid #dbeafe;
-
-    background:
-        #eff6ff;
+.success {
+    background: #dcfce7;
+    color: #166534;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| MOBILE
-|--------------------------------------------------------------------------
-*/
+.error {
+    background: #fee2e2;
+    color: #991b1b;
+}
 
 @media (max-width: 800px) {
-
     .grid {
-
-        grid-template-columns:
-            1fr;
+        grid-template-columns: 1fr;
     }
-
-
-    .page-header {
-
-        flex-direction:
-            column;
-
-        align-items:
-            flex-start;
-    }
-
-
-    .navbar {
-
-        padding:
-            15px 20px;
-    }
-
-
-    .navbar-container {
-
-        flex-direction:
-            column;
-
-        align-items:
-            flex-start;
-
-        gap:
-            15px;
-    }
-
-
-    .nav-links {
-
-        flex-wrap:
-            wrap;
-
-        gap:
-            12px;
-    }
-
-
-    .pdf-preview {
-
-        height:
-            300px;
-    }
-
 }
 
 </style>
 
 </head>
 
-
 <body>
 
-
-<!-- =========================================================
-     NAVBAR
-========================================================= -->
-
-<nav class="navbar">
-
-    <div class="navbar-container">
-
-        <a href="dashboard.php" class="logo">
-            Job Portal Admin
-        </a>
-
-        <div class="nav-links">
-
-            <a href="dashboard.php">
-                Dashboard
-            </a>
-
-            <a href="jobs.php">
-                Manage Jobs
-            </a>
-
-            <a href="employers.php">
-                Manage Employers
-            </a>
-
-            <a href="applicants.php">
-                Manage Applicants
-            </a>
-
-            <a href="reports.php">Manage Reports</a>
-
-            <a href="../logout.php" class="logout">
-                Logout
-            </a>
-
-        </div>
-
-    </div>
-
-</nav>
-
+<?php require __DIR__ . "/includes/header.php"; ?>
 
 
 <div class="container">
 
+    <h1>
+        <?= htmlspecialchars(
+            $employer["company_name"]
+        ) ?>
+    </h1>
 
-    <!-- =====================================================
-         HEADER
-    ====================================================== -->
+    <p>
+        Employer verification review.
+    </p>
 
-    <div class="page-header">
+    <br>
 
-        <div>
-
-            <h1>
-
-                <?= htmlspecialchars(
-                    $employer[
-                        "company_name"
-                    ]
-                ) ?>
-
-            </h1>
-
-
-            <p>
-                Employer profile and verification review.
-            </p>
-
-        </div>
-
-
-        <a
-            href="employers.php"
-            class="btn btn-gray"
-        >
-            ← Back to Employers
-        </a>
-
-    </div>
-
-
-
-    <!-- SUCCESS -->
 
     <?php if ($success): ?>
 
-        <div class="alert alert-success">
-
-            <?= htmlspecialchars(
-                $success
-            ) ?>
-
+        <div class="alert success">
+            <?= htmlspecialchars($success) ?>
         </div>
 
     <?php endif; ?>
 
-
-
-    <!-- ERROR -->
 
     <?php if ($error): ?>
 
-        <div class="alert alert-error">
-
-            <?= htmlspecialchars(
-                $error
-            ) ?>
-
+        <div class="alert error">
+            <?= htmlspecialchars($error) ?>
         </div>
 
     <?php endif; ?>
-
-
-
-    <?php
-
-    $documentStatus =
-        $verification[
-            "document_status"
-        ]
-        ?? "unverified";
-
-
-    $locationStatus =
-        $verification[
-            "location_status"
-        ]
-        ?? "unverified";
-
-
-    $adminStatus =
-        $verification[
-            "admin_status"
-        ]
-        ?? "unverified";
-
-
-    $employerStatus =
-        $employer[
-            "verification_status"
-        ]
-        ?? "unverified";
-
-
-    $adminNotes =
-        $verification[
-            "admin_notes"
-        ]
-        ?? "";
-
-    ?>
-
 
 
     <div class="grid">
 
-
-        <!-- =================================================
-             LEFT COLUMN
-        ================================================== -->
-
         <div>
 
-
-            <!-- COMPANY INFO -->
-
             <div class="card">
 
                 <h2>
-                    Company Information
+                    Employer Information
                 </h2>
 
-
-                <div class="info-row">
-
-                    <div class="info-label">
-                        Company Name
+                <div class="info">
+                    <div class="label">
+                        Employer Type
                     </div>
-
-                    <div class="info-value">
-
-                        <?= htmlspecialchars(
-                            $employer[
-                                "company_name"
-                            ]
-                            ?: "N/A"
-                        ) ?>
-
+                    <div class="value">
+                        <?= $employerType === "lgu"
+                            ? "Local Government Unit (LGU)"
+                            : "Private Employer"
+                        ?>
                     </div>
-
                 </div>
 
-
-
-                <div class="info-row">
-
-                    <div class="info-label">
+                <div class="info">
+                    <div class="label">
                         Email
                     </div>
-
-                    <div class="info-value">
-
+                    <div class="value">
                         <?= htmlspecialchars(
-                            $employer[
-                                "email"
-                            ]
+                            $employer["email"]
                         ) ?>
-
                     </div>
-
                 </div>
 
-
-
-                <div class="info-row">
-
-                    <div class="info-label">
-                        Company Description
-                    </div>
-
-                    <div class="info-value">
-
-                        <?= nl2br(
-                            htmlspecialchars(
-                                $employer[
-                                    "company_description"
-                                ]
-                                ?: "N/A"
-                            )
-                        ) ?>
-
-                    </div>
-
-                </div>
-
-
-
-                <div class="info-row">
-
-                    <div class="info-label">
+                <div class="info">
+                    <div class="label">
                         Contact Person
                     </div>
-
-                    <div class="info-value">
-
+                    <div class="value">
                         <?= htmlspecialchars(
-                            $employer[
-                                "contact_person"
-                            ]
+                            $employer["contact_person"]
                             ?: "N/A"
                         ) ?>
-
                     </div>
-
                 </div>
 
-
-
-                <div class="info-row">
-
-                    <div class="info-label">
+                <div class="info">
+                    <div class="label">
                         Contact Number
                     </div>
-
-                    <div class="info-value">
-
+                    <div class="value">
                         <?= htmlspecialchars(
-                            $employer[
-                                "contact_number"
-                            ]
+                            $employer["contact_number"]
                             ?: "N/A"
                         ) ?>
-
                     </div>
-
                 </div>
 
-
-            </div>
-
-
-
-            <!-- BUSINESS LOCATION -->
-
-            <div class="card">
-
-                <h2>
-                    Business Location
-                </h2>
-
-
-                <div class="info-row">
-
-                    <div class="info-label">
+                <div class="info">
+                    <div class="label">
                         Address
                     </div>
-
-                    <div class="info-value">
-
+                    <div class="value">
                         <?= htmlspecialchars(
-                            $employer[
-                                "address"
-                            ]
+                            $employer["address"]
                             ?: "N/A"
                         ) ?>
-
                     </div>
-
                 </div>
 
-
-
-                <div class="info-row">
-
-                    <div class="info-label">
-                        Barangay
+                <div class="info">
+                    <div class="label">
+                        Barangay / Area
                     </div>
-
-                    <div class="info-value">
-
+                    <div class="value">
                         <?= htmlspecialchars(
-                            $employer[
-                                "barangay"
-                            ]
+                            $employer["barangay"]
                             ?: "N/A"
                         ) ?>
-
-                    </div>
-
-                </div>
-
-
-
-                <div class="info-row">
-
-                    <div class="info-label">
-                        Caloocan Area
-                    </div>
-
-
-                    <div class="info-value">
-
 
                         <?php if (
-                            !empty(
-                                $employer[
-                                    "caloocan_area"
-                                ]
-                            )
+                            $employer["caloocan_area"]
                         ): ?>
 
-
-                            <span
-                                class="
-                                    area
-                                    <?= htmlspecialchars(
-                                        $employer[
-                                            "caloocan_area"
-                                        ]
-                                    ) ?>
-                                "
-                            >
-
-                                <?= strtoupper(
-                                    htmlspecialchars(
-                                        $employer[
-                                            "caloocan_area"
-                                        ]
-                                    )
-                                ) ?>
-
-                                CALOOCAN
-
-                            </span>
-
-
-                        <?php else: ?>
-
-                            N/A
+                            -
+                            <?= ucfirst(
+                                htmlspecialchars(
+                                    $employer[
+                                        "caloocan_area"
+                                    ]
+                                )
+                            ) ?>
+                            Caloocan
 
                         <?php endif; ?>
-
-
                     </div>
-
                 </div>
-
-
-
-                <div class="info-row">
-
-                    <div class="info-label">
-                        Latitude
-                    </div>
-
-                    <div class="info-value">
-
-                        <?= htmlspecialchars(
-                            $employer[
-                                "latitude"
-                            ]
-                            ?: "N/A"
-                        ) ?>
-
-                    </div>
-
-                </div>
-
-
-
-                <div class="info-row">
-
-                    <div class="info-label">
-                        Longitude
-                    </div>
-
-                    <div class="info-value">
-
-                        <?= htmlspecialchars(
-                            $employer[
-                                "longitude"
-                            ]
-                            ?: "N/A"
-                        ) ?>
-
-                    </div>
-
-                </div>
-
-
-
-                <?php if (
-                    !empty(
-                        $employer[
-                            "latitude"
-                        ]
-                    ) &&
-                    !empty(
-                        $employer[
-                            "longitude"
-                        ]
-                    )
-                ): ?>
-
-
-                    <iframe
-                        id="map"
-
-                        src="https://www.google.com/maps?q=<?= urlencode(
-                            $employer[
-                                "latitude"
-                            ]
-                        ) ?>,<?= urlencode(
-                            $employer[
-                                "longitude"
-                            ]
-                        ) ?>&z=17&output=embed"
-
-                        loading="lazy"
-
-                        allowfullscreen
-                    ></iframe>
-
-
-                <?php endif; ?>
-
-
-
-                <!-- LOCATION ACTION -->
-
-                <div class="action-buttons">
-
-
-                    <form method="POST">
-
-                        <textarea
-                            name="admin_notes"
-                            style="display:none;"
-                        ><?= htmlspecialchars(
-                            $adminNotes
-                        ) ?></textarea>
-
-
-                        <input
-                            type="hidden"
-                            name="action"
-                            value="approve_location"
-                        >
-
-
-                        <button
-                            type="submit"
-                            class="btn btn-green"
-                        >
-                            ✓ Approve Location
-                        </button>
-
-                    </form>
-
-
-
-                    <form method="POST">
-
-                        <textarea
-                            name="admin_notes"
-                            style="display:none;"
-                        ><?= htmlspecialchars(
-                            $adminNotes
-                        ) ?></textarea>
-
-
-                        <input
-                            type="hidden"
-                            name="action"
-                            value="reject_location"
-                        >
-
-
-                        <button
-                            type="submit"
-                            class="btn btn-red"
-                        >
-                            Reject Location
-                        </button>
-
-                    </form>
-
-
-                </div>
-
 
             </div>
 
-
-
-            <!-- =================================================
-                 DOCUMENTS
-            ================================================== -->
 
             <div class="card">
 
@@ -1979,34 +875,22 @@ body {
                     Verification Documents
                 </h2>
 
-
-
-                <!-- GOVERNMENT ID -->
-
                 <div class="document">
 
                     <h3>
                         Government ID
                     </h3>
 
-
                     <?php
-
                     documentPreview(
-                        $verification[
-                            "government_id"
-                        ]
+                        $verification["government_id"]
                         ?? null,
                         "Government ID"
                     );
-
                     ?>
 
                 </div>
 
-
-
-                <!-- BARANGAY CERTIFICATE -->
 
                 <div class="document">
 
@@ -2014,9 +898,7 @@ body {
                         Barangay Certificate
                     </h3>
 
-
                     <?php
-
                     documentPreview(
                         $verification[
                             "barangay_certificate"
@@ -2024,14 +906,10 @@ body {
                         ?? null,
                         "Barangay Certificate"
                     );
-
                     ?>
 
                 </div>
 
-
-
-                <!-- BUSINESS PERMIT -->
 
                 <div class="document">
 
@@ -2039,477 +917,222 @@ body {
                         Business Permit
                     </h3>
 
+                    <?php if (
+                        $employerType === "lgu" &&
+                        empty(
+                            $verification[
+                                "business_permit"
+                            ]
+                            ?? null
+                        )
+                    ): ?>
 
-                    <?php
+                        <div class="missing">
+                            Not required for LGU employer.
+                        </div>
 
-                    documentPreview(
-                        $verification[
-                            "business_permit"
-                        ]
-                        ?? null,
-                        "Business Permit"
-                    );
+                    <?php else: ?>
 
-                    ?>
+                        <?php
+                        documentPreview(
+                            $verification[
+                                "business_permit"
+                            ]
+                            ?? null,
+                            "Business Permit"
+                        );
+                        ?>
+
+                    <?php endif; ?>
 
                 </div>
 
+            </div>
+
+        </div>
 
 
-                <!-- DOCUMENT ACTION -->
+        <div>
 
-                <div class="action-buttons">
+            <div class="card">
+
+                <h2>
+                    Status
+                </h2>
+
+                <?php
+                $documentStatus =
+                    $verification[
+                        "document_status"
+                    ]
+                    ?? null;
+
+                $locationStatus =
+                    $verification[
+                        "location_status"
+                    ]
+                    ?? null;
+
+                $adminStatus =
+                    $verification[
+                        "admin_status"
+                    ]
+                    ?? null;
+                ?>
+
+                <p>
+                    Documents:
+                    <span
+                        class="status <?= statusClass(
+                            $documentStatus
+                        ) ?>"
+                    >
+                        <?= htmlspecialchars(
+                            statusLabel(
+                                $documentStatus
+                            )
+                        ) ?>
+                    </span>
+                </p>
+
+                <br>
+
+                <p>
+                    Location:
+                    <span
+                        class="status <?= statusClass(
+                            $locationStatus
+                        ) ?>"
+                    >
+                        <?= htmlspecialchars(
+                            statusLabel(
+                                $locationStatus
+                            )
+                        ) ?>
+                    </span>
+                </p>
+
+                <br>
+
+                <p>
+                    Admin:
+                    <span
+                        class="status <?= statusClass(
+                            $adminStatus
+                        ) ?>"
+                    >
+                        <?= htmlspecialchars(
+                            statusLabel(
+                                $adminStatus
+                            )
+                        ) ?>
+                    </span>
+                </p>
+
+            </div>
 
 
-                    <form method="POST">
+            <div class="card">
 
-                        <textarea
-                            name="admin_notes"
-                            style="display:none;"
-                        ><?= htmlspecialchars(
-                            $adminNotes
-                        ) ?></textarea>
+                <h2>
+                    Admin Review
+                </h2>
+
+                <form method="POST">
+
+                    <textarea
+                        name="admin_notes"
+                        placeholder="Admin notes / rejection reason"
+                    ><?= htmlspecialchars(
+                        $verification["admin_notes"]
+                        ?? ""
+                    ) ?></textarea>
 
 
-                        <input
-                            type="hidden"
-                            name="action"
-                            value="approve_documents"
-                        >
-
+                    <div class="actions">
 
                         <button
-                            type="submit"
-                            class="btn btn-green"
+                            name="action"
+                            value="save_notes"
+                            class="btn blue"
                         >
-                            ✓ Approve Documents
+                            Save Notes
                         </button>
 
-                    </form>
+                    </div>
 
 
-
-                    <form method="POST">
-
-                        <textarea
-                            name="admin_notes"
-                            style="display:none;"
-                        ><?= htmlspecialchars(
-                            $adminNotes
-                        ) ?></textarea>
-
-
-                        <input
-                            type="hidden"
-                            name="action"
-                            value="reject_documents"
-                        >
-
+                    <div class="actions">
 
                         <button
-                            type="submit"
-                            class="btn btn-red"
+                            name="action"
+                            value="approve_documents"
+                            class="btn green"
+                        >
+                            Approve Documents
+                        </button>
+
+                        <button
+                            name="action"
+                            value="reject_documents"
+                            class="btn red"
                         >
                             Reject Documents
                         </button>
 
-                    </form>
-
-
-                </div>
-
-
-            </div>
-
-
-        </div>
-
-
-
-        <!-- =================================================
-             RIGHT COLUMN
-        ================================================== -->
-
-        <div>
-
-
-            <!-- VERIFICATION STATUS -->
-
-            <div class="card">
-
-                <h2>
-                    Verification Status
-                </h2>
-
-
-
-                <div class="info-row">
-
-                    <div class="info-label">
-                        Documents
                     </div>
 
 
-                    <span
-                        class="
-                            status
-                            <?= statusClass(
-                                $documentStatus
-                            ) ?>
-                        "
-                    >
-
-                        <?= htmlspecialchars(
-                            statusLabel(
-                                $documentStatus
-                            )
-                        ) ?>
-
-                    </span>
-
-                </div>
-
-
-
-                <div class="info-row">
-
-                    <div class="info-label">
-                        Location
-                    </div>
-
-
-                    <span
-                        class="
-                            status
-                            <?= statusClass(
-                                $locationStatus
-                            ) ?>
-                        "
-                    >
-
-                        <?= htmlspecialchars(
-                            statusLabel(
-                                $locationStatus
-                            )
-                        ) ?>
-
-                    </span>
-
-                </div>
-
-
-
-                <div class="info-row">
-
-                    <div class="info-label">
-                        Admin Approval
-                    </div>
-
-
-                    <span
-                        class="
-                            status
-                            <?= statusClass(
-                                $adminStatus
-                            ) ?>
-                        "
-                    >
-
-                        <?= htmlspecialchars(
-                            statusLabel(
-                                $adminStatus
-                            )
-                        ) ?>
-
-                    </span>
-
-                </div>
-
-
-
-                <div class="info-row">
-
-                    <div class="info-label">
-                        Employer Verification
-                    </div>
-
-
-                    <span
-                        class="
-                            status
-                            <?= statusClass(
-                                $employerStatus
-                            ) ?>
-                        "
-                    >
-
-                        <?= htmlspecialchars(
-                            statusLabel(
-                                $employerStatus
-                            )
-                        ) ?>
-
-                    </span>
-
-                </div>
-
-
-            </div>
-
-
-
-            <!-- =================================================
-                 ADMIN NOTES
-            ================================================== -->
-
-            <div class="card">
-
-                <h2>
-                    Admin Notes
-                </h2>
-
-
-                <p class="note-help">
-
-                    Add notes about the employer,
-                    documents, location, or reason
-                    for rejection.
-
-                </p>
-
-
-                <form method="POST">
-
-
-                    <textarea
-                        name="admin_notes"
-                        class="admin-notes"
-                        placeholder="Example: Business permit is valid. Barangay certificate matches the company address."
-                    ><?= htmlspecialchars(
-                        $adminNotes
-                    ) ?></textarea>
-
-
-                    <input
-                        type="hidden"
-                        name="action"
-                        value="save_notes"
-                    >
-
-
-                    <div class="action-buttons">
+                    <div class="actions">
 
                         <button
-                            type="submit"
-                            class="btn btn-blue"
+                            name="action"
+                            value="approve_location"
+                            class="btn green"
                         >
-                            Save Admin Notes
+                            Approve Location
+                        </button>
+
+                        <button
+                            name="action"
+                            value="reject_location"
+                            class="btn red"
+                        >
+                            Reject Location
                         </button>
 
                     </div>
 
 
-                </form>
+                    <div class="actions">
 
-
-            </div>
-
-
-
-            <!-- =================================================
-                 FINAL EMPLOYER APPROVAL
-            ================================================== -->
-
-            <div
-                class="
-                    card
-                    final-approval
-                "
-            >
-
-                <h2>
-                    Employer Approval
-                </h2>
-
-
-                <p
-                    style="
-                        color:#666;
-                        line-height:1.5;
-                        margin-bottom:20px;
-                    "
-                >
-
-                    Documents and location must
-                    both be approved before the
-                    employer can be approved.
-
-                </p>
-
-
-
-                <!-- APPROVE EMPLOYER -->
-
-                <form
-                    method="POST"
-                    style="margin-bottom:10px;"
-                >
-
-
-                    <textarea
-                        name="admin_notes"
-                        style="display:none;"
-                    ><?= htmlspecialchars(
-                        $adminNotes
-                    ) ?></textarea>
-
-
-                    <input
-                        type="hidden"
-                        name="action"
-                        value="approve_employer"
-                    >
-
-
-                    <button
-                        type="submit"
-                        class="btn btn-green"
-                    >
-
-                        ✓ APPROVE EMPLOYER
-
-                    </button>
-
-
-                </form>
-
-
-
-                <!-- REJECT EMPLOYER -->
-
-                <form method="POST">
-
-
-                    <textarea
-                        name="admin_notes"
-                        style="display:none;"
-                    ><?= htmlspecialchars(
-                        $adminNotes
-                    ) ?></textarea>
-
-
-                    <input
-                        type="hidden"
-                        name="action"
-                        value="reject_employer"
-                    >
-
-
-                    <button
-                        type="submit"
-                        class="btn btn-red"
-                    >
-
-                        REJECT EMPLOYER
-
-                    </button>
-
-
-                </form>
-
-
-            </div>
-
-
-
-            <!-- ACCOUNT -->
-
-            <div class="card">
-
-                <h2>
-                    Account Information
-                </h2>
-
-
-                <div class="info-row">
-
-                    <div class="info-label">
-                        Account Status
-                    </div>
-
-
-                    <?php if (
-                        $employer[
-                            "is_active"
-                        ]
-                    ): ?>
-
-
-                        <span
-                            class="
-                                status
-                                approved
-                            "
+                        <button
+                            name="action"
+                            value="approve_employer"
+                            class="btn green"
                         >
-                            Active
-                        </span>
+                            Approve Employer
+                        </button>
 
-
-                    <?php else: ?>
-
-
-                        <span
-                            class="
-                                status
-                                rejected
-                            "
+                        <button
+                            name="action"
+                            value="reject_employer"
+                            class="btn red"
                         >
-                            Inactive
-                        </span>
-
-
-                    <?php endif; ?>
-
-
-                </div>
-
-
-
-                <div class="info-row">
-
-                    <div class="info-label">
-                        Registered
-                    </div>
-
-
-                    <div class="info-value">
-
-                        <?= date(
-                            "F d, Y",
-                            strtotime(
-                                $employer[
-                                    "created_at"
-                                ]
-                            )
-                        ) ?>
+                            Reject Employer
+                        </button>
 
                     </div>
 
-                </div>
-
+                </form>
 
             </div>
-
 
         </div>
 
-
     </div>
-
 
 </div>
 
-
 </body>
-
 </html>

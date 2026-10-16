@@ -7,80 +7,163 @@ require_once "config/database.php";
 $error = "";
 $success = "";
 
-if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
-    $email = trim($_POST["email"] ?? "");
+/*
+|--------------------------------------------------------------------------
+| DEFAULT FORM VALUES
+|--------------------------------------------------------------------------
+*/
+
+$role = $_POST["role"] ?? "";
+
+$firstName = trim($_POST["first_name"] ?? "");
+$lastName = trim($_POST["last_name"] ?? "");
+$phone = trim($_POST["phone"] ?? "");
+
+$employerType = trim($_POST["employer_type"] ?? "");
+$companyName = trim($_POST["company_name"] ?? "");
+
+$email = trim($_POST["email"] ?? "");
+
+
+/*
+|--------------------------------------------------------------------------
+| REGISTER
+|--------------------------------------------------------------------------
+*/
+
+if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $password = $_POST["password"] ?? "";
     $confirmPassword = $_POST["confirm_password"] ?? "";
-    $role = $_POST["role"] ?? "";
 
-    // Applicant fields
-    $firstName = trim($_POST["first_name"] ?? "");
-    $lastName = trim($_POST["last_name"] ?? "");
-    $phone = trim($_POST["phone"] ?? "");
+    /*
+    |--------------------------------------------------------------------------
+    | BASIC VALIDATION
+    |--------------------------------------------------------------------------
+    */
 
-    // Employer fields
-    $companyName = trim($_POST["company_name"] ?? "");
-
-    // Validation
-    if ($email === "" || $password === "" || $role === "") {
-
+    if (
+        $email === "" ||
+        $password === "" ||
+        $role === ""
+    ) {
         $error = "Please fill in all required fields.";
-
     } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-
         $error = "Please enter a valid email address.";
-
     } elseif (strlen($password) < 6) {
-
         $error = "Password must be at least 6 characters.";
-
     } elseif ($password !== $confirmPassword) {
-
         $error = "Passwords do not match.";
-
-    } elseif (!in_array($role, ["applicant", "employer"])) {
-
+    } elseif (
+        !in_array(
+            $role,
+            ["applicant", "employer"],
+            true
+        )
+    ) {
         $error = "Invalid account type.";
+    }
 
-    } elseif ($role === "applicant" && ($firstName === "" || $lastName === "")) {
 
+    /*
+    |--------------------------------------------------------------------------
+    | APPLICANT VALIDATION
+    |--------------------------------------------------------------------------
+    */
+
+    elseif (
+        $role === "applicant" &&
+        (
+            $firstName === "" ||
+            $lastName === ""
+        )
+    ) {
         $error = "First name and last name are required.";
+    }
 
-    } elseif ($role === "employer" && $companyName === "") {
 
-        $error = "Company name is required.";
+    /*
+    |--------------------------------------------------------------------------
+    | EMPLOYER VALIDATION
+    |--------------------------------------------------------------------------
+    */
 
-    } else {
+    elseif (
+        $role === "employer" &&
+        !in_array(
+            $employerType,
+            ["private", "lgu"],
+            true
+        )
+    ) {
+        $error = "Please select an employer type.";
+    } elseif (
+        $role === "employer" &&
+        $companyName === ""
+    ) {
+        $error = "Company / Organization Name is required.";
+    }
 
+
+    /*
+    |--------------------------------------------------------------------------
+    | CREATE ACCOUNT
+    |--------------------------------------------------------------------------
+    */
+
+    else {
         try {
+            /*
+            |--------------------------------------------------------------------------
+            | CHECK EMAIL
+            |--------------------------------------------------------------------------
+            */
 
-            // Check if email already exists
-            $stmt = $pdo->prepare(
-                "SELECT id FROM users WHERE email = ? LIMIT 1"
-            );
+            $stmt = $pdo->prepare("
+                SELECT id
+                FROM users
+                WHERE email = ?
+                LIMIT 1
+            ");
 
             $stmt->execute([$email]);
 
             if ($stmt->fetch()) {
-
                 $error = "An account with this email already exists.";
-
             } else {
+                /*
+                |--------------------------------------------------------------------------
+                | HASH PASSWORD
+                |--------------------------------------------------------------------------
+                */
 
-                // Hash password
                 $passwordHash = password_hash(
                     $password,
                     PASSWORD_DEFAULT
                 );
 
-                // Start transaction
+
+                /*
+                |--------------------------------------------------------------------------
+                | START TRANSACTION
+                |--------------------------------------------------------------------------
+                */
+
                 $pdo->beginTransaction();
 
-                // Insert user
+
+                /*
+                |--------------------------------------------------------------------------
+                | CREATE USER
+                |--------------------------------------------------------------------------
+                */
+
                 $stmt = $pdo->prepare("
-                    INSERT INTO users
-                    (email, password, role)
+                    INSERT INTO users (
+                        email,
+                        password,
+                        role
+                    )
                     VALUES (?, ?, ?)
                 ");
 
@@ -90,14 +173,18 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     $role
                 ]);
 
-                $userId = $pdo->lastInsertId();
+                $userId = (int) $pdo->lastInsertId();
 
-                // Create Applicant profile
+
+                /*
+                |--------------------------------------------------------------------------
+                | CREATE APPLICANT PROFILE
+                |--------------------------------------------------------------------------
+                */
+
                 if ($role === "applicant") {
-
                     $stmt = $pdo->prepare("
-                        INSERT INTO applicants
-                        (
+                        INSERT INTO applicants (
                             user_id,
                             first_name,
                             last_name,
@@ -110,41 +197,78 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                         $userId,
                         $firstName,
                         $lastName,
-                        $phone
+                        $phone !== ""
+                            ? $phone
+                            : null
                     ]);
                 }
 
-                // Create Employer profile
-                if ($role === "employer") {
 
+                /*
+                |--------------------------------------------------------------------------
+                | CREATE EMPLOYER PROFILE
+                |--------------------------------------------------------------------------
+                */
+
+                if ($role === "employer") {
                     $stmt = $pdo->prepare("
-                        INSERT INTO employers
-                        (
+                        INSERT INTO employers (
                             user_id,
-                            company_name
+                            company_name,
+                            employer_type
                         )
-                        VALUES (?, ?)
+                        VALUES (?, ?, ?)
                     ");
 
                     $stmt->execute([
                         $userId,
-                        $companyName
+                        $companyName,
+                        $employerType
                     ]);
                 }
 
-                // Commit
+
+                /*
+                |--------------------------------------------------------------------------
+                | COMMIT
+                |--------------------------------------------------------------------------
+                */
+
                 $pdo->commit();
 
-                $success = "Registration successful! You can now login.";
+                $success =
+                    "Registration successful! You can now login.";
+
+
+                /*
+                |--------------------------------------------------------------------------
+                | CLEAR FORM
+                |--------------------------------------------------------------------------
+                */
+
+                $role = "";
+                $firstName = "";
+                $lastName = "";
+                $phone = "";
+
+                $employerType = "";
+                $companyName = "";
+
+                $email = "";
             }
 
-        } catch (Exception $e) {
-
+        } catch (Throwable $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
 
-            $error = "Something went wrong. Please try again.";
+            error_log(
+                "Registration error: " .
+                $e->getMessage()
+            );
+
+            $error =
+                "Something went wrong. Please try again.";
         }
     }
 }
@@ -163,7 +287,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         content="width=device-width, initial-scale=1.0"
     >
 
-    <title>Register - Caloocan Job Portal</title>
+    <title>
+        Register - Caloocan Job Portal
+    </title>
 
 
     <!-- Bootstrap Icons -->
@@ -184,39 +310,34 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
 
         body {
-
-            font-family:
-                Arial,
-                Helvetica,
-                sans-serif;
+            font-family: Arial, Helvetica, sans-serif;
 
             background:
                 linear-gradient(
                     rgba(0, 0, 0, 0.35),
                     rgba(0, 0, 0, 0.35)
                 ),
-                url("assets/images/caloocan-bg.png") center center / cover no-repeat fixed;
+                url("assets/images/caloocan-bg.png")
+                center center / cover no-repeat fixed;
 
             min-height: 100vh;
 
             display: flex;
-
             align-items: center;
-
             justify-content: center;
 
             padding: 30px;
         }
 
 
-        /* =========================
-           REGISTER CONTAINER
-           ========================= */
+        /*
+        |--------------------------------------------------------------------------
+        | REGISTER CONTAINER
+        |--------------------------------------------------------------------------
+        */
 
         .register-container {
-
             width: 100%;
-
             max-width: 500px;
 
             background: #ffffff;
@@ -230,16 +351,16 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
 
 
-        /* =========================
-           LOGO
-           ========================= */
+        /*
+        |--------------------------------------------------------------------------
+        | LOGO
+        |--------------------------------------------------------------------------
+        */
 
         .logo {
-
             text-align: center;
 
             font-size: 26px;
-
             font-weight: bold;
 
             color: #2563eb;
@@ -248,12 +369,13 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
 
 
-        /* =========================
-           TITLE
-           ========================= */
+        /*
+        |--------------------------------------------------------------------------
+        | TITLE
+        |--------------------------------------------------------------------------
+        */
 
         .title {
-
             text-align: center;
 
             font-size: 22px;
@@ -263,7 +385,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
 
         .subtitle {
-
             text-align: center;
 
             color: #64748b;
@@ -274,22 +395,21 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
 
 
-        /* =========================
-           FORM
-           ========================= */
+        /*
+        |--------------------------------------------------------------------------
+        | FORM
+        |--------------------------------------------------------------------------
+        */
 
         .form-group {
-
             margin-bottom: 17px;
         }
 
 
         label {
-
             display: block;
 
             font-size: 14px;
-
             font-weight: bold;
 
             margin-bottom: 7px;
@@ -298,13 +418,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         input,
         select {
-
             width: 100%;
 
             padding: 12px;
 
             border: 1px solid #cbd5e1;
-
             border-radius: 6px;
 
             font-size: 14px;
@@ -317,7 +435,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         input:focus,
         select:focus {
-
             border-color: #2563eb;
 
             box-shadow:
@@ -325,12 +442,31 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
 
 
-        /* =========================
-           PASSWORD INPUT
-           ========================= */
+        /*
+        |--------------------------------------------------------------------------
+        | EMPLOYER TYPE INFO
+        |--------------------------------------------------------------------------
+        */
+
+        .field-help {
+            display: block;
+
+            margin-top: 6px;
+
+            color: #64748b;
+
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | PASSWORD INPUT
+        |--------------------------------------------------------------------------
+        */
 
         .password-input {
-
             position: relative;
 
             width: 100%;
@@ -338,21 +474,20 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
 
         .password-input input {
-
             padding-right: 45px;
         }
 
 
-        /* =========================
-           EYE ICON
-           ========================= */
+        /*
+        |--------------------------------------------------------------------------
+        | EYE ICON
+        |--------------------------------------------------------------------------
+        */
 
         .toggle-password {
-
             position: absolute;
 
             right: 13px;
-
             top: 50%;
 
             transform: translateY(-50%);
@@ -366,9 +501,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             line-height: 1;
 
             display: flex;
-
             align-items: center;
-
             justify-content: center;
 
             user-select: none;
@@ -378,17 +511,17 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
 
         .toggle-password:hover {
-
             color: #2563eb;
         }
 
 
-        /* =========================
-           SUBMIT BUTTON
-           ========================= */
+        /*
+        |--------------------------------------------------------------------------
+        | SUBMIT BUTTON
+        |--------------------------------------------------------------------------
+        */
 
         button[type="submit"] {
-
             width: 100%;
 
             padding: 13px;
@@ -398,11 +531,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             color: white;
 
             border: none;
-
             border-radius: 6px;
 
             font-size: 15px;
-
             font-weight: bold;
 
             cursor: pointer;
@@ -412,17 +543,17 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
 
         button[type="submit"]:hover {
-
             background: #1d4ed8;
         }
 
 
-        /* =========================
-           ERROR
-           ========================= */
+        /*
+        |--------------------------------------------------------------------------
+        | ERROR
+        |--------------------------------------------------------------------------
+        */
 
         .error {
-
             background: #fee2e2;
 
             color: #b91c1c;
@@ -437,12 +568,13 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
 
 
-        /* =========================
-           SUCCESS
-           ========================= */
+        /*
+        |--------------------------------------------------------------------------
+        | SUCCESS
+        |--------------------------------------------------------------------------
+        */
 
         .success {
-
             background: #dcfce7;
 
             color: #166534;
@@ -457,12 +589,13 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
 
 
-        /* =========================
-           LOGIN LINK
-           ========================= */
+        /*
+        |--------------------------------------------------------------------------
+        | LOGIN LINK
+        |--------------------------------------------------------------------------
+        */
 
         .login-link {
-
             text-align: center;
 
             margin-top: 20px;
@@ -474,7 +607,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
 
         .login-link a {
-
             color: #2563eb;
 
             font-weight: bold;
@@ -484,18 +616,37 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
 
         .login-link a:hover {
-
             text-decoration: underline;
         }
 
 
-        /* =========================
-           ROLE FIELDS
-           ========================= */
+        /*
+        |--------------------------------------------------------------------------
+        | ROLE FIELDS
+        |--------------------------------------------------------------------------
+        */
 
         .role-fields {
-
             display: none;
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | MOBILE
+        |--------------------------------------------------------------------------
+        */
+
+        @media (max-width: 600px) {
+
+            body {
+                padding: 15px;
+            }
+
+            .register-container {
+                padding: 25px 20px;
+            }
+
         }
 
     </style>
@@ -533,9 +684,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     <?php if ($error): ?>
 
         <div class="error">
-
             <?= htmlspecialchars($error) ?>
-
         </div>
 
     <?php endif; ?>
@@ -546,9 +695,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     <?php if ($success): ?>
 
         <div class="success">
-
             <?= htmlspecialchars($success) ?>
-
         </div>
 
     <?php endif; ?>
@@ -578,11 +725,25 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     Select account type
                 </option>
 
-                <option value="applicant">
+
+                <option
+                    value="applicant"
+                    <?= $role === "applicant"
+                        ? "selected"
+                        : ""
+                    ?>
+                >
                     Find a Job
                 </option>
 
-                <option value="employer">
+
+                <option
+                    value="employer"
+                    <?= $role === "employer"
+                        ? "selected"
+                        : ""
+                    ?>
+                >
                     Hire Employees
                 </option>
 
@@ -591,9 +752,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         </div>
 
 
-        <!-- =========================
+        <!-- =====================================================
              APPLICANT FIELDS
-             ========================= -->
+        ====================================================== -->
 
         <div
             id="applicant-fields"
@@ -610,6 +771,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     type="text"
                     name="first_name"
                     id="first_name"
+                    value="<?= htmlspecialchars(
+                        $firstName
+                    ) ?>"
                 >
 
             </div>
@@ -625,6 +789,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     type="text"
                     name="last_name"
                     id="last_name"
+                    value="<?= htmlspecialchars(
+                        $lastName
+                    ) ?>"
                 >
 
             </div>
@@ -640,6 +807,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     type="text"
                     name="phone"
                     id="phone"
+                    value="<?= htmlspecialchars(
+                        $phone
+                    ) ?>"
                 >
 
             </div>
@@ -647,25 +817,81 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         </div>
 
 
-        <!-- =========================
+        <!-- =====================================================
              EMPLOYER FIELDS
-             ========================= -->
+        ====================================================== -->
 
         <div
             id="employer-fields"
             class="role-fields"
         >
 
+
+            <!-- EMPLOYER TYPE -->
+
+            <div class="form-group">
+
+                <label for="employer_type">
+                    Employer Type
+                </label>
+
+                <select
+                    name="employer_type"
+                    id="employer_type"
+                >
+
+                    <option value="">
+                        Select employer type
+                    </option>
+
+
+                    <option
+                        value="private"
+                        <?= $employerType === "private"
+                            ? "selected"
+                            : ""
+                        ?>
+                    >
+                        Private Employer
+                    </option>
+
+
+                    <option
+                        value="lgu"
+                        <?= $employerType === "lgu"
+                            ? "selected"
+                            : ""
+                        ?>
+                    >
+                        Local Government Unit (LGU)
+                    </option>
+
+                </select>
+
+                <small class="field-help">
+                    LGU accounts are still subject to
+                    administrator verification before
+                    job posting access is approved.
+                </small>
+
+            </div>
+
+
+            <!-- COMPANY / ORGANIZATION -->
+
             <div class="form-group">
 
                 <label for="company_name">
-                    Company Name
+                    Company / Organization Name
                 </label>
 
                 <input
                     type="text"
                     name="company_name"
                     id="company_name"
+                    value="<?= htmlspecialchars(
+                        $companyName
+                    ) ?>"
                 >
 
             </div>
@@ -686,15 +912,14 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 name="email"
                 id="email"
                 placeholder="you@example.com"
+                value="<?= htmlspecialchars($email) ?>"
                 required
             >
 
         </div>
 
 
-        <!-- =========================
-             PASSWORD
-             ========================= -->
+        <!-- PASSWORD -->
 
         <div class="form-group">
 
@@ -716,7 +941,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
                 <span
                     class="toggle-password"
-                    onclick="togglePassword('password', 'eyePassword')"
+                    onclick="togglePassword(
+                        'password',
+                        'eyePassword'
+                    )"
                     id="eyePassword"
                     title="Show password"
                 >
@@ -730,9 +958,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         </div>
 
 
-        <!-- =========================
-             CONFIRM PASSWORD
-             ========================= -->
+        <!-- CONFIRM PASSWORD -->
 
         <div class="form-group">
 
@@ -754,7 +980,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
                 <span
                     class="toggle-password"
-                    onclick="togglePassword('confirm_password', 'eyeConfirmPassword')"
+                    onclick="togglePassword(
+                        'confirm_password',
+                        'eyeConfirmPassword'
+                    )"
                     id="eyeConfirmPassword"
                     title="Show password"
                 >
@@ -789,67 +1018,120 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
     </div>
 
-
 </div>
 
 
 <script>
 
-
-/* =========================
-   SHOW ROLE FIELDS
-   ========================= */
+/*
+|--------------------------------------------------------------------------
+| SHOW ROLE FIELDS
+|--------------------------------------------------------------------------
+*/
 
 function showRoleFields() {
-
     const role =
         document.getElementById("role").value;
 
     const applicantFields =
-        document.getElementById("applicant-fields");
+        document.getElementById(
+            "applicant-fields"
+        );
 
     const employerFields =
-        document.getElementById("employer-fields");
+        document.getElementById(
+            "employer-fields"
+        );
 
+    const firstName =
+        document.getElementById(
+            "first_name"
+        );
+
+    const lastName =
+        document.getElementById(
+            "last_name"
+        );
+
+    const employerType =
+        document.getElementById(
+            "employer_type"
+        );
+
+    const companyName =
+        document.getElementById(
+            "company_name"
+        );
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | HIDE EVERYTHING FIRST
+    |--------------------------------------------------------------------------
+    */
 
     applicantFields.style.display = "none";
-
     employerFields.style.display = "none";
 
+    firstName.required = false;
+    lastName.required = false;
+
+    employerType.required = false;
+    companyName.required = false;
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | APPLICANT
+    |--------------------------------------------------------------------------
+    */
 
     if (role === "applicant") {
+        applicantFields.style.display =
+            "block";
 
-        applicantFields.style.display = "block";
-
+        firstName.required = true;
+        lastName.required = true;
     }
 
+
+    /*
+    |--------------------------------------------------------------------------
+    | EMPLOYER
+    |--------------------------------------------------------------------------
+    */
 
     if (role === "employer") {
+        employerFields.style.display =
+            "block";
 
-        employerFields.style.display = "block";
-
+        employerType.required = true;
+        companyName.required = true;
     }
-
 }
 
 
-/* =========================
-   SHOW / HIDE PASSWORD
-   ========================= */
+/*
+|--------------------------------------------------------------------------
+| SHOW / HIDE PASSWORD
+|--------------------------------------------------------------------------
+*/
 
-function togglePassword(passwordId, iconId) {
-
+function togglePassword(
+    passwordId,
+    iconId
+) {
     const password =
-        document.getElementById(passwordId);
+        document.getElementById(
+            passwordId
+        );
 
     const eyeIcon =
-        document.getElementById(iconId);
-
+        document.getElementById(
+            iconId
+        );
 
     if (password.type === "password") {
-
-        // Show password
-
         password.type = "text";
 
         eyeIcon.innerHTML =
@@ -857,11 +1139,7 @@ function togglePassword(passwordId, iconId) {
 
         eyeIcon.title =
             "Hide password";
-
     } else {
-
-        // Hide password
-
         password.type = "password";
 
         eyeIcon.innerHTML =
@@ -869,10 +1147,22 @@ function togglePassword(passwordId, iconId) {
 
         eyeIcon.title =
             "Show password";
-
     }
-
 }
+
+
+/*
+|--------------------------------------------------------------------------
+| LOAD CORRECT FIELDS ON PAGE LOAD
+|--------------------------------------------------------------------------
+*/
+
+document.addEventListener(
+    "DOMContentLoaded",
+    function () {
+        showRoleFields();
+    }
+);
 
 </script>
 

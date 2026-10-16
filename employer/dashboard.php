@@ -456,51 +456,9 @@ body {
 
 <body>
 
-<nav class="navbar">
-
-    <div class="logo">
-        JobPortal
-    </div>
-
-    <div class="nav-links">
-
-        <a href="../index.php">
-            Home
-        </a>
-
-
-        <a href="dashboard.php" active="active">
-            Dashboard
-        </a>
-
-
-        <a
-            href="profile.php"
-        >
-            Profile
-        </a>
-
-
-        <a href="jobs.php">
-            My Jobs
-        </a>
-
-
-        <a href="applicants.php">
-            Applicants
-        </a>
-
-
-        <a
-            href="../logout.php"
-            class="logout"
-        >
-            Logout
-        </a>
-
-    </div>
-
-</nav>
+<?php
+require __DIR__ . "/includes/header.php";
+?>
 
 
 <div class="container">

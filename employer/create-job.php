@@ -4,24 +4,16 @@ session_start();
 
 require_once "../config/database.php";
 
-
-/*
-|--------------------------------------------------------------------------
-| AUTH CHECK
-|--------------------------------------------------------------------------
-*/
-
 if (
     !isset($_SESSION["user_id"]) ||
-    $_SESSION["role"] !== "employer"
+    ($_SESSION["role"] ?? "") !== "employer"
 ) {
-
     header("Location: ../login.php");
     exit;
 }
 
-
-$userId = (int) $_SESSION["user_id"];
+$userId =
+    (int) $_SESSION["user_id"];
 
 $error = "";
 
@@ -33,124 +25,95 @@ $error = "";
 */
 
 $stmt = $pdo->prepare("
-
     SELECT
-
         id,
         company_name,
+        employer_type,
         address,
         barangay,
         caloocan_area,
         latitude,
         longitude,
         verification_status
-
     FROM employers
-
     WHERE user_id = ?
-
     LIMIT 1
-
 ");
 
-
-$stmt->execute([
-    $userId
-]);
-
+$stmt->execute([$userId]);
 
 $employer =
-    $stmt->fetch(
-        PDO::FETCH_ASSOC
-    );
-
+    $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$employer) {
-
-    die(
-        "Employer profile not found."
-    );
+    die("Employer profile not found.");
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| EMPLOYER MUST BE VERIFIED
-|--------------------------------------------------------------------------
-*/
-
-if (
-    $employer["verification_status"]
-    !== "approved"
-) {
-
-    header(
-        "Location: jobs.php?verification_required=1"
-    );
-
-    exit;
-}
-
 
 $employerId =
     (int) $employer["id"];
 
+$employerType =
+    $employer["employer_type"]
+    ?? "private";
+
 
 /*
 |--------------------------------------------------------------------------
-| VERIFIED EMPLOYER LOCATION
+| VERIFICATION
 |--------------------------------------------------------------------------
 */
 
-$verifiedAddress =
+if (
+    ($employer["verification_status"] ?? "")
+    !== "approved"
+) {
+    header(
+        "Location: jobs.php?verification_required=1"
+    );
+    exit;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| VERIFIED LOCATION
+|--------------------------------------------------------------------------
+*/
+
+$jobAddress =
     trim(
         $employer["address"]
         ?? ""
     );
 
-
-$verifiedBarangay =
+$jobBarangay =
     trim(
         $employer["barangay"]
         ?? ""
     );
 
-
-$verifiedArea =
+$jobArea =
     trim(
         $employer["caloocan_area"]
         ?? ""
     );
 
-
-$verifiedLatitude =
+$jobLatitude =
     $employer["latitude"]
-    ?? "";
+    ?? null;
 
-
-$verifiedLongitude =
+$jobLongitude =
     $employer["longitude"]
-    ?? "";
-
-
-/*
-|--------------------------------------------------------------------------
-| MAKE SURE VERIFIED LOCATION EXISTS
-|--------------------------------------------------------------------------
-*/
+    ?? null;
 
 if (
-    $verifiedAddress === "" ||
-    $verifiedBarangay === "" ||
-    $verifiedArea === "" ||
-    $verifiedLatitude === "" ||
-    $verifiedLongitude === ""
+    $jobAddress === "" ||
+    $jobBarangay === "" ||
+    $jobArea === "" ||
+    !is_numeric($jobLatitude) ||
+    !is_numeric($jobLongitude)
 ) {
-
-    header(
-        "Location: profile.php"
-    );
-
+    header("Location: profile.php");
     exit;
 }
 
@@ -162,23 +125,43 @@ if (
 */
 
 $jobTitle = "";
-
 $jobDescription = "";
+$requirements = "";
+$requiredSkills = "";
 
-$employmentType = "";
+$employmentType =
+    "Full-time";
 
 $salaryMin = "";
-
 $salaryMax = "";
-
 $applicationDeadline = "";
 
-$requirements = "";
+$isRemote = 0;
+
+$postingType =
+    "regular";
+
+$sourceName = "";
+$sourceUrl = "";
+$lguJobCategory = "";
+
+$requiresEducation =
+    "no";
+
+$educationalRequirement = "";
+$requiredDegree = "";
+$degreeClassification = "";
+
+$requiresTesda =
+    "no";
+
+$tesdaQualification = "";
+$requiredNcLevel = "";
 
 
 /*
 |--------------------------------------------------------------------------
-| HANDLE FORM SUBMISSION
+| SUBMIT
 |--------------------------------------------------------------------------
 */
 
@@ -186,22 +169,12 @@ if (
     $_SERVER["REQUEST_METHOD"]
     === "POST"
 ) {
-
     try {
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | JOB INPUT
-        |--------------------------------------------------------------------------
-        */
-
         $jobTitle =
             trim(
                 $_POST["job_title"]
                 ?? ""
             );
-
 
         $jobDescription =
             trim(
@@ -209,6 +182,17 @@ if (
                 ?? ""
             );
 
+        $requirements =
+            trim(
+                $_POST["requirements"]
+                ?? ""
+            );
+
+        $requiredSkills =
+            trim(
+                $_POST["required_skills"]
+                ?? ""
+            );
 
         $employmentType =
             trim(
@@ -216,13 +200,11 @@ if (
                 ?? ""
             );
 
-
         $salaryMin =
             trim(
                 $_POST["salary_min"]
                 ?? ""
             );
-
 
         $salaryMax =
             trim(
@@ -230,120 +212,116 @@ if (
                 ?? ""
             );
 
-
         $applicationDeadline =
             trim(
                 $_POST["application_deadline"]
                 ?? ""
             );
 
+        $isRemote =
+            isset($_POST["is_remote"])
+                ? 1
+                : 0;
 
-        $requirements =
+        $postingType =
             trim(
-                $_POST["requirements"]
+                $_POST["posting_type"]
+                ?? "regular"
+            );
+
+        $sourceName =
+            trim(
+                $_POST["source_name"]
+                ?? ""
+            );
+
+        $sourceUrl =
+            trim(
+                $_POST["source_url"]
+                ?? ""
+            );
+
+        $lguJobCategory =
+            trim(
+                $_POST["lgu_job_category"]
+                ?? ""
+            );
+
+        $requiresEducation =
+            trim(
+                $_POST["requires_education"]
+                ?? "no"
+            );
+
+        $educationalRequirement =
+            trim(
+                $_POST["educational_requirement"]
+                ?? ""
+            );
+
+        $requiredDegree =
+            trim(
+                $_POST["required_degree"]
+                ?? ""
+            );
+
+        $degreeClassification =
+            trim(
+                $_POST["degree_classification"]
+                ?? ""
+            );
+
+        $requiresTesda =
+            trim(
+                $_POST["requires_tesda"]
+                ?? "no"
+            );
+
+        $tesdaQualification =
+            trim(
+                $_POST["tesda_qualification"]
+                ?? ""
+            );
+
+        $requiredNcLevel =
+            trim(
+                $_POST["required_nc_level"]
                 ?? ""
             );
 
 
         /*
         |--------------------------------------------------------------------------
-        | SERVER-SIDE LOCATION
-        |--------------------------------------------------------------------------
-        |
-        | Hindi galing sa form ang location.
-        |
-        | Direkta itong kinukuha sa verified employer profile
-        | para hindi mabago gamit ang browser developer tools.
-        |
-        */
-
-        $jobAddress =
-            $verifiedAddress;
-
-
-        $jobBarangay =
-            $verifiedBarangay;
-
-
-        $jobArea =
-            $verifiedArea;
-
-
-        $jobLatitude =
-            $verifiedLatitude;
-
-
-        $jobLongitude =
-            $verifiedLongitude;
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | LOCATION DISPLAY
+        | VALIDATION
         |--------------------------------------------------------------------------
         */
 
-        $location =
-            $jobBarangay
-            . ", "
-            . strtoupper(
-                $jobArea
-            )
-            . " Caloocan";
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | JOB TITLE
-        |--------------------------------------------------------------------------
-        */
-
-        if (
-            $jobTitle === ""
-        ) {
-
+        if ($jobTitle === "") {
             throw new Exception(
                 "Job title is required."
             );
         }
 
-
-        /*
-        |--------------------------------------------------------------------------
-        | JOB DESCRIPTION
-        |--------------------------------------------------------------------------
-        */
-
-        if (
-            $jobDescription === ""
-        ) {
-
+        if ($jobDescription === "") {
             throw new Exception(
                 "Job description is required."
             );
         }
 
+        if ($requiredSkills === "") {
+            throw new Exception(
+                "Required skills are required."
+            );
+        }
 
-        /*
-        |--------------------------------------------------------------------------
-        | EMPLOYMENT TYPE
-        |--------------------------------------------------------------------------
-        */
 
         $allowedEmploymentTypes = [
-
             "Full-time",
-
             "Part-time",
-
             "Contract",
-
-            "Temporary",
-
-            "Internship"
-
+            "Internship",
+            "Freelance"
         ];
-
 
         if (
             !in_array(
@@ -352,44 +330,168 @@ if (
                 true
             )
         ) {
-
             throw new Exception(
-                "Please select a valid employment type."
+                "Invalid employment type."
             );
         }
 
 
         /*
         |--------------------------------------------------------------------------
-        | SALARY VALIDATION
+        | POSTING TYPE
+        |--------------------------------------------------------------------------
+        */
+
+        if (
+            !in_array(
+                $postingType,
+                [
+                    "regular",
+                    "job_fair"
+                ],
+                true
+            )
+        ) {
+            throw new Exception(
+                "Invalid posting type."
+            );
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | JOB SOURCE
+        |--------------------------------------------------------------------------
+        */
+
+        if ($postingType === "job_fair") {
+            $jobSource =
+                "job_fair";
+
+            if ($sourceName === "") {
+                throw new Exception(
+                    "Job Fair Name / Source Name is required."
+                );
+            }
+
+        } else {
+            if ($employerType === "lgu") {
+                $jobSource =
+                    "lgu";
+
+                $sourceName =
+                    $employer["company_name"];
+            } else {
+                $jobSource =
+                    "private_employer";
+
+                $sourceName = "";
+            }
+
+            $sourceUrl = "";
+        }
+
+        if (
+            $sourceUrl !== "" &&
+            !filter_var(
+                $sourceUrl,
+                FILTER_VALIDATE_URL
+            )
+        ) {
+            throw new Exception(
+                "Please enter a valid source URL."
+            );
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | EDUCATION
+        |--------------------------------------------------------------------------
+        */
+
+        if (
+            !in_array(
+                $requiresEducation,
+                ["yes", "no"],
+                true
+            )
+        ) {
+            $requiresEducation = "no";
+        }
+
+        if ($requiresEducation === "yes") {
+            if (
+                $educationalRequirement === ""
+            ) {
+                throw new Exception(
+                    "Please select an educational requirement."
+                );
+            }
+        } else {
+            $educationalRequirement = "";
+            $requiredDegree = "";
+            $degreeClassification = "";
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | TESDA
+        |--------------------------------------------------------------------------
+        */
+
+        if (
+            !in_array(
+                $requiresTesda,
+                ["yes", "no"],
+                true
+            )
+        ) {
+            $requiresTesda = "no";
+        }
+
+        if ($requiresTesda === "yes") {
+            if ($tesdaQualification === "") {
+                throw new Exception(
+                    "Please enter the TESDA qualification."
+                );
+            }
+
+            if ($requiredNcLevel === "") {
+                throw new Exception(
+                    "Please select the required NC level."
+                );
+            }
+        } else {
+            $tesdaQualification = "";
+            $requiredNcLevel = "";
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | SALARY
         |--------------------------------------------------------------------------
         */
 
         if (
             $salaryMin !== "" &&
-            !is_numeric(
-                $salaryMin
-            )
+            !is_numeric($salaryMin)
         ) {
-
             throw new Exception(
-                "Minimum salary must be a valid number."
+                "Invalid minimum salary."
             );
         }
-
 
         if (
             $salaryMax !== "" &&
-            !is_numeric(
-                $salaryMax
-            )
+            !is_numeric($salaryMax)
         ) {
-
             throw new Exception(
-                "Maximum salary must be a valid number."
+                "Invalid maximum salary."
             );
         }
-
 
         if (
             $salaryMin !== "" &&
@@ -397,7 +499,6 @@ if (
             (float) $salaryMin >
             (float) $salaryMax
         ) {
-
             throw new Exception(
                 "Minimum salary cannot be greater than maximum salary."
             );
@@ -406,60 +507,24 @@ if (
 
         /*
         |--------------------------------------------------------------------------
-        | SALARY NULL VALUES
+        | DEADLINE
         |--------------------------------------------------------------------------
         */
 
-        $salaryMinValue =
-            $salaryMin !== ""
-            ? (float) $salaryMin
-            : null;
-
-
-        $salaryMaxValue =
-            $salaryMax !== ""
-            ? (float) $salaryMax
-            : null;
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | DEADLINE VALIDATION
-        |--------------------------------------------------------------------------
-        */
-
-        if (
-            $applicationDeadline === ""
-        ) {
-
+        if ($applicationDeadline === "") {
             throw new Exception(
                 "Application deadline is required."
             );
         }
 
-
         if (
             strtotime(
                 $applicationDeadline
-            ) === false
-        ) {
-
-            throw new Exception(
-                "Invalid application deadline."
-            );
-        }
-
-
-        if (
-            strtotime(
-                $applicationDeadline
-            )
-            <
+            ) <
             strtotime(
                 date("Y-m-d")
             )
         ) {
-
             throw new Exception(
                 "Application deadline cannot be in the past."
             );
@@ -468,165 +533,134 @@ if (
 
         /*
         |--------------------------------------------------------------------------
-        | LOCATION VALIDATION
+        | LOCATION
         |--------------------------------------------------------------------------
         */
 
-        if (
-            $jobAddress === "" ||
-            $jobBarangay === "" ||
-            $jobArea === ""
-        ) {
-
-            throw new Exception(
-                "Your verified employer location is incomplete."
-            );
-        }
-
-
-        if (
-            !is_numeric(
-                $jobLatitude
-            ) ||
-            !is_numeric(
-                $jobLongitude
-            )
-        ) {
-
-            throw new Exception(
-                "Your verified employer coordinates are invalid."
-            );
-        }
+        $location =
+            "Brgy. "
+            . $jobBarangay
+            . ", "
+            . ucfirst($jobArea)
+            . " Caloocan";
 
 
         /*
         |--------------------------------------------------------------------------
-        | INSERT JOB
+        | INSERT
         |--------------------------------------------------------------------------
-        |
-        | New job will start as PENDING.
-        |
-        | Admin must approve the job first.
-        |
         */
 
-        $stmt =
-            $pdo->prepare("
-
-                INSERT INTO jobs
-                (
-
-                    employer_id,
-
-                    job_title,
-
-                    job_description,
-
-                    requirements,
-
-                    location,
-
-                    address,
-
-                    barangay,
-
-                    caloocan_area,
-
-                    latitude,
-
-                    longtitude,
-
-                    employment_type,
-
-                    salary_min,
-
-                    salary_max,
-
-                    application_deadline,
-
-                    status,
-
-                    created_at
-
-                )
-
-                VALUES
-                (
-
-                    ?,
-                    ?,
-                    ?,
-                    ?,
-                    ?,
-                    ?,
-                    ?,
-                    ?,
-                    ?,
-                    ?,
-                    ?,
-                    ?,
-                    ?,
-                    ?,
-
-                    'pending',
-
-                    NOW()
-
-                )
-
-            ");
-
+        $stmt = $pdo->prepare("
+            INSERT INTO jobs (
+                employer_id,
+                job_title,
+                job_description,
+                description,
+                requirements,
+                educational_requirement,
+                required_degree,
+                required_skills,
+                location,
+                address,
+                barangay,
+                caloocan_area,
+                latitude,
+                longtitude,
+                employment_type,
+                salary_min,
+                salary_max,
+                is_remote,
+                status,
+                application_deadline,
+                tesda_qualification,
+                required_nc_level,
+                job_source,
+                source_name,
+                source_url,
+                degree_classification,
+                lgu_job_category,
+                created_at
+            )
+            VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, 'pending', ?,
+                ?, ?, ?, ?, ?, ?, ?, NOW()
+            )
+        ");
 
         $stmt->execute([
-
             $employerId,
-
             $jobTitle,
-
+            $jobDescription,
             $jobDescription,
 
-            $requirements,
+            $requirements !== ""
+                ? $requirements
+                : null,
+
+            $educationalRequirement !== ""
+                ? $educationalRequirement
+                : null,
+
+            $requiredDegree !== ""
+                ? $requiredDegree
+                : null,
+
+            $requiredSkills,
 
             $location,
-
             $jobAddress,
-
             $jobBarangay,
-
             $jobArea,
-
             $jobLatitude,
-
             $jobLongitude,
-
             $employmentType,
 
-            $salaryMinValue,
+            $salaryMin !== ""
+                ? (float) $salaryMin
+                : null,
 
-            $salaryMaxValue,
+            $salaryMax !== ""
+                ? (float) $salaryMax
+                : null,
 
-            $applicationDeadline
+            $isRemote,
+            $applicationDeadline,
 
+            $tesdaQualification !== ""
+                ? $tesdaQualification
+                : null,
+
+            $requiredNcLevel !== ""
+                ? $requiredNcLevel
+                : null,
+
+            $jobSource,
+
+            $sourceName !== ""
+                ? $sourceName
+                : null,
+
+            $sourceUrl !== ""
+                ? $sourceUrl
+                : null,
+
+            $degreeClassification !== ""
+                ? $degreeClassification
+                : null,
+
+            $lguJobCategory !== ""
+                ? $lguJobCategory
+                : null
         ]);
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | SUCCESS
-        |--------------------------------------------------------------------------
-        */
 
         header(
             "Location: jobs.php?created=1"
         );
-
         exit;
 
-
-    } catch (
-        Exception $e
-    ) {
-
+    } catch (Throwable $e) {
         $error =
             $e->getMessage();
     }
@@ -635,9 +669,7 @@ if (
 ?>
 
 <!DOCTYPE html>
-
 <html lang="en">
-
 
 <head>
 
@@ -648,855 +680,192 @@ if (
     content="width=device-width, initial-scale=1.0"
 >
 
-
 <title>
-    Post a Job - Caloocan Job Portal
+    Post Job - Employer
 </title>
-
 
 <style>
 
-/*
-|--------------------------------------------------------------------------
-| BASE
-|--------------------------------------------------------------------------
-*/
-
 * {
-
-    box-sizing:
-        border-box;
-
-    margin:
-        0;
-
-    padding:
-        0;
+    box-sizing: border-box;
 }
-
 
 body {
-
-    font-family:
-        Arial,
-        Helvetica,
-        sans-serif;
-
-    background:
-        #f5f7fb;
-
-    color:
-        #333;
+    margin: 0;
+    font-family: Arial, Helvetica, sans-serif;
+    background: #f5f7fb;
+    color: #222;
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| NAVBAR
-|--------------------------------------------------------------------------
-*/
-
-.navbar {
-
-    background:
-        white;
-
-    border-bottom:
-        1px solid #ddd;
-
-    padding:
-        16px 40px;
-
-    display:
-        flex;
-
-    justify-content:
-        space-between;
-
-    align-items:
-        center;
-}
-
-
-.logo {
-
-    font-size:
-        24px;
-
-    font-weight:
-        bold;
-
-    color:
-        #2563eb;
-}
-
-
-.nav-links {
-
-    display:
-        flex;
-
-    gap:
-        20px;
-
-    align-items:
-        center;
-}
-
-
-.nav-links a {
-
-    text-decoration:
-        none;
-
-    color:
-        #333;
-}
-
-
-.nav-links a:hover {
-
-    color:
-        #2563eb;
-}
-
-
-.nav-links .active {
-
-    color:
-        #2563eb;
-
-    font-weight:
-        bold;
-}
-
-
-.logout {
-
-    color:
-        #dc2626 !important;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| CONTAINER
-|--------------------------------------------------------------------------
-*/
 
 .container {
-
-    max-width:
-        950px;
-
-    margin:
-        40px auto;
-
-    padding:
-        0 20px 50px;
+    max-width: 950px;
+    margin: 35px auto;
+    padding: 0 20px 50px;
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| HEADER
-|--------------------------------------------------------------------------
-*/
 
 .page-header {
-
-    margin-bottom:
-        25px;
+    margin-bottom: 25px;
 }
-
-
-.page-header h1 {
-
-    margin-bottom:
-        7px;
-}
-
 
 .page-header p {
-
-    color:
-        #666;
-
-    line-height:
-        1.5;
+    color: #64748b;
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| CARD
-|--------------------------------------------------------------------------
-*/
 
 .card {
-
-    background:
-        white;
-
-    padding:
-        25px;
-
-    border-radius:
-        10px;
-
-    box-shadow:
-        0 2px 10px
-        rgba(
-            0,
-            0,
-            0,
-            0.05
-        );
-
-    margin-bottom:
-        20px;
+    margin-bottom: 20px;
+    padding: 25px;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 9px;
 }
-
 
 .card h2 {
-
-    margin-bottom:
-        7px;
+    margin-top: 0;
+    margin-bottom: 20px;
 }
-
-
-.card-description {
-
-    color:
-        #666;
-
-    font-size:
-        14px;
-
-    line-height:
-        1.5;
-
-    margin-bottom:
-        22px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| FORM
-|--------------------------------------------------------------------------
-*/
 
 .form-grid {
-
-    display:
-        grid;
-
-    grid-template-columns:
-        1fr 1fr;
-
-    gap:
-        18px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
 }
-
 
 .form-group {
-
-    margin-bottom:
-        18px;
+    margin-bottom: 17px;
 }
 
-
-.form-group.full {
-
-    grid-column:
-        1 / -1;
+.full {
+    grid-column: 1 / -1;
 }
-
 
 label {
-
-    display:
-        block;
-
-    font-size:
-        14px;
-
-    font-weight:
-        bold;
-
-    margin-bottom:
-        7px;
+    display: block;
+    margin-bottom: 7px;
+    font-weight: bold;
+    font-size: 14px;
 }
 
-
-input[type="text"],
-input[type="number"],
-input[type="date"],
+input,
 select,
 textarea {
-
-    width:
-        100%;
-
-    padding:
-        11px 12px;
-
-    border:
-        1px solid #d1d5db;
-
-    border-radius:
-        6px;
-
-    font-family:
-        Arial,
-        Helvetica,
-        sans-serif;
-
-    font-size:
-        14px;
-
-    background:
-        white;
+    width: 100%;
+    padding: 11px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 14px;
 }
-
-
-input:focus,
-select:focus,
-textarea:focus {
-
-    outline:
-        none;
-
-    border-color:
-        #2563eb;
-
-    box-shadow:
-        0 0 0 2px
-        rgba(
-            37,
-            99,
-            235,
-            0.08
-        );
-}
-
 
 textarea {
-
-    min-height:
-        130px;
-
-    resize:
-        vertical;
+    min-height: 110px;
+    resize: vertical;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| READ ONLY
-|--------------------------------------------------------------------------
-*/
-
-.readonly {
-
-    background:
-        #f8fafc !important;
-
-    color:
-        #475569;
+.help {
+    display: block;
+    margin-top: 6px;
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.5;
 }
 
+.account-box {
+    padding: 15px;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 7px;
+    color: #1e40af;
+    line-height: 1.6;
+}
 
-/*
-|--------------------------------------------------------------------------
-| ALERT
-|--------------------------------------------------------------------------
-*/
+.optional {
+    padding: 18px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 7px;
+}
 
 .alert {
-
-    padding:
-        14px 16px;
-
-    border-radius:
-        8px;
-
-    margin-bottom:
-        20px;
-
-    line-height:
-        1.5;
+    margin-bottom: 20px;
+    padding: 14px;
+    background: #fee2e2;
+    color: #991b1b;
+    border-radius: 7px;
 }
 
-
-.alert-error {
-
-    background:
-        #fee2e2;
-
-    color:
-        #991b1b;
-
-    border:
-        1px solid #fecaca;
+.checkbox {
+    display: flex;
+    gap: 8px;
+    align-items: center;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| VERIFIED LOCATION
-|--------------------------------------------------------------------------
-*/
-
-.location-box {
-
-    background:
-        #eff6ff;
-
-    border:
-        1px solid #bfdbfe;
-
-    border-radius:
-        8px;
-
-    padding:
-        18px;
-
-    margin-bottom:
-        20px;
+.checkbox input {
+    width: auto;
 }
-
-
-.location-box h3 {
-
-    color:
-        #1e40af;
-
-    margin-bottom:
-        8px;
-}
-
-
-.location-box p {
-
-    color:
-        #475569;
-
-    font-size:
-        14px;
-
-    line-height:
-        1.5;
-}
-
-
-.verified-badge {
-
-    display:
-        inline-block;
-
-    background:
-        #dcfce7;
-
-    color:
-        #166534;
-
-    padding:
-        5px 10px;
-
-    border-radius:
-        20px;
-
-    font-size:
-        12px;
-
-    font-weight:
-        bold;
-
-    margin-top:
-        10px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| AREA BADGE
-|--------------------------------------------------------------------------
-*/
-
-.area-badge {
-
-    display:
-        inline-block;
-
-    padding:
-        7px 12px;
-
-    border-radius:
-        20px;
-
-    font-size:
-        13px;
-
-    font-weight:
-        bold;
-}
-
-
-.area-north {
-
-    background:
-        #dbeafe;
-
-    color:
-        #1e40af;
-}
-
-
-.area-south {
-
-    background:
-        #dcfce7;
-
-    color:
-        #166534;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| MAP
-|--------------------------------------------------------------------------
-*/
-
-#map {
-
-    width:
-        100%;
-
-    height:
-        350px;
-
-    border:
-        1px solid #ddd;
-
-    border-radius:
-        8px;
-
-    margin-top:
-        10px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| BUTTONS
-|--------------------------------------------------------------------------
-*/
 
 .actions {
-
-    display:
-        flex;
-
-    justify-content:
-        flex-end;
-
-    gap:
-        10px;
-
-    flex-wrap:
-        wrap;
+    display: flex;
+    gap: 10px;
 }
-
 
 .btn {
-
-    display:
-        inline-block;
-
-    padding:
-        11px 17px;
-
-    border:
-        none;
-
-    border-radius:
-        6px;
-
-    background:
-        #2563eb;
-
-    color:
-        white;
-
-    text-decoration:
-        none;
-
-    cursor:
-        pointer;
-
-    font-size:
-        14px;
+    padding: 11px 16px;
+    border: none;
+    border-radius: 6px;
+    font-weight: bold;
+    text-decoration: none;
+    cursor: pointer;
 }
 
-
-.btn:hover {
-
-    background:
-        #1d4ed8;
+.btn-primary {
+    background: #2563eb;
+    color: #ffffff;
 }
-
 
 .btn-secondary {
-
-    background:
-        #64748b;
+    background: #e2e8f0;
+    color: #334155;
 }
 
-
-.btn-secondary:hover {
-
-    background:
-        #475569;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| NOTE
-|--------------------------------------------------------------------------
-*/
-
-.note {
-
-    background:
-        #f8fafc;
-
-    border:
-        1px solid #e2e8f0;
-
-    padding:
-        15px;
-
-    border-radius:
-        8px;
-
-    color:
-        #555;
-
-    font-size:
-        13px;
-
-    line-height:
-        1.6;
-
-    margin-top:
-        15px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| MOBILE
-|--------------------------------------------------------------------------
-*/
-
-@media (
-    max-width: 700px
-) {
-
+@media (max-width: 700px) {
     .form-grid {
-
-        grid-template-columns:
-            1fr;
+        grid-template-columns: 1fr;
     }
 
-
-    .form-group.full {
-
-        grid-column:
-            auto;
-    }
-
-
-    .navbar {
-
-        padding:
-            15px 20px;
-
-        flex-direction:
-            column;
-
-        align-items:
-            flex-start;
-
-        gap:
-            15px;
-    }
-
-
-    .nav-links {
-
-        flex-wrap:
-            wrap;
-
-        gap:
-            12px;
-    }
-
-
-    #map {
-
-        height:
-            280px;
-    }
-
-
-    .actions {
-
-        justify-content:
-            flex-start;
+    .full {
+        grid-column: auto;
     }
 }
 
 </style>
 
-
 </head>
-
 
 <body>
 
+<?php require __DIR__ . "/includes/header.php"; ?>
 
-<!-- =========================================================
-     NAVBAR
-========================================================= -->
-
-<nav class="navbar">
-
-
-    <div class="logo">
-
-        JobPortal
-
-    </div>
-
-
-    <div class="nav-links">
-
-
-        <a href="../index.php">
-
-            Home
-
-        </a>
-
-
-        <a href="dashboard.php">
-
-            Dashboard
-
-        </a>
-
-
-        <a href="profile.php">
-
-            Profile
-
-        </a>
-
-
-        <a
-            href="jobs.php"
-            class="active"
-        >
-
-            My Jobs
-
-        </a>
-
-
-        <a href="applicants.php">
-
-            Applicants
-
-        </a>
-
-
-        <a
-            href="../logout.php"
-            class="logout"
-        >
-
-            Logout
-
-        </a>
-
-
-    </div>
-
-
-</nav>
-
-
-<!-- =========================================================
-     MAIN
-========================================================= -->
 
 <div class="container">
 
-
-    <!-- =====================================================
-         PAGE HEADER
-    ====================================================== -->
-
     <div class="page-header">
 
-
         <h1>
-
             Post a Job
-
         </h1>
 
-
         <p>
-
-            Create a new job opening for
-
-            <strong>
-
-                <?= htmlspecialchars(
-                    $employer[
-                        "company_name"
-                    ]
-                ) ?>
-
-            </strong>.
-
+            The job will be submitted for administrator approval.
         </p>
-
 
     </div>
 
 
-    <!-- =====================================================
-         ERROR
-    ====================================================== -->
-
     <?php if ($error): ?>
 
-
-        <div class="alert alert-error">
-
-            <?= htmlspecialchars(
-                $error
-            ) ?>
-
+        <div class="alert">
+            <?= htmlspecialchars($error) ?>
         </div>
-
 
     <?php endif; ?>
 
@@ -1504,565 +873,762 @@ textarea {
     <form method="POST">
 
 
-        <!-- =================================================
-             JOB DETAILS
-        ================================================== -->
+        <div class="card">
+
+            <h2>
+                Employer & Posting Source
+            </h2>
+
+            <div class="account-box">
+
+                <strong>
+                    Employer Type:
+                </strong>
+
+                <?= $employerType === "lgu"
+                    ? "Local Government Unit (LGU)"
+                    : "Private Employer"
+                ?>
+
+                <br>
+
+                Regular jobs will automatically use your
+                verified employer type as their source.
+
+            </div>
+
+            <br>
+
+            <div class="form-group">
+
+                <label for="posting_type">
+                    Posting Type
+                </label>
+
+                <select
+                    name="posting_type"
+                    id="posting_type"
+                    onchange="toggleSourceFields()"
+                >
+
+                    <option
+                        value="regular"
+                        <?= $postingType === "regular"
+                            ? "selected"
+                            : ""
+                        ?>
+                    >
+                        Regular Job Posting
+                    </option>
+
+                    <option
+                        value="job_fair"
+                        <?= $postingType === "job_fair"
+                            ? "selected"
+                            : ""
+                        ?>
+                    >
+                        Job Fair Posting
+                    </option>
+
+                </select>
+
+            </div>
+
+
+            <div
+                id="sourceFields"
+                class="optional"
+            >
+
+                <div class="form-group">
+
+                    <label for="source_name">
+                        Job Fair / Source Name
+                    </label>
+
+                    <input
+                        type="text"
+                        name="source_name"
+                        id="source_name"
+                        value="<?= htmlspecialchars(
+                            $sourceName
+                        ) ?>"
+                        placeholder="Example: Caloocan Mega Job Fair 2026"
+                    >
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label for="source_url">
+                        Official / Reference URL
+                    </label>
+
+                    <input
+                        type="url"
+                        name="source_url"
+                        id="source_url"
+                        value="<?= htmlspecialchars(
+                            $sourceUrl
+                        ) ?>"
+                        placeholder="https://..."
+                    >
+
+                    <small class="help">
+                        Optional. Add an official or trusted source
+                        link when available.
+                    </small>
+
+                </div>
+
+            </div>
+
+        </div>
+
 
         <div class="card">
 
-
             <h2>
-
-                Job Details
-
+                Job Information
             </h2>
-
-
-            <p class="card-description">
-
-                Enter the information
-                about the job opening.
-
-            </p>
-
 
             <div class="form-grid">
 
-
-                <!-- JOB TITLE -->
-
                 <div class="form-group full">
 
-
-                    <label>
-
-                        Job Title *
-
+                    <label for="job_title">
+                        Job Title
                     </label>
-
 
                     <input
                         type="text"
                         name="job_title"
-                        required
-
-                        placeholder="Example: Sales Associate"
-
+                        id="job_title"
                         value="<?= htmlspecialchars(
                             $jobTitle
                         ) ?>"
-                    >
-
-
-                </div>
-
-
-                <!-- EMPLOYMENT TYPE -->
-
-                <div class="form-group">
-
-
-                    <label>
-
-                        Employment Type *
-
-                    </label>
-
-
-                    <select
-                        name="employment_type"
                         required
                     >
 
-
-                        <option value="">
-
-                            Select employment type
-
-                        </option>
+                </div>
 
 
-                        <option
-                            value="Full-time"
+                <div class="form-group full">
 
-                            <?= $employmentType ===
-                                "Full-time"
-                                ? "selected"
-                                : ""
-                            ?>
-                        >
+                    <label for="job_description">
+                        Job Description
+                    </label>
 
-                            Full-time
-
-                        </option>
-
-
-                        <option
-                            value="Part-time"
-
-                            <?= $employmentType ===
-                                "Part-time"
-                                ? "selected"
-                                : ""
-                            ?>
-                        >
-
-                            Part-time
-
-                        </option>
-
-
-                        <option
-                            value="Contract"
-
-                            <?= $employmentType ===
-                                "Contract"
-                                ? "selected"
-                                : ""
-                            ?>
-                        >
-
-                            Contract
-
-                        </option>
-
-
-                        <option
-                            value="Temporary"
-
-                            <?= $employmentType ===
-                                "Temporary"
-                                ? "selected"
-                                : ""
-                            ?>
-                        >
-
-                            Temporary
-
-                        </option>
-
-
-                        <option
-                            value="Internship"
-
-                            <?= $employmentType ===
-                                "Internship"
-                                ? "selected"
-                                : ""
-                            ?>
-                        >
-
-                            Internship
-
-                        </option>
-
-
-                    </select>
-
+                    <textarea
+                        name="job_description"
+                        id="job_description"
+                        required
+                    ><?= htmlspecialchars(
+                        $jobDescription
+                    ) ?></textarea>
 
                 </div>
 
 
-                <!-- APPLICATION DEADLINE -->
+                <div class="form-group full">
+
+                    <label for="requirements">
+                        Other Requirements / Notes
+                    </label>
+
+                    <textarea
+                        name="requirements"
+                        id="requirements"
+                    ><?= htmlspecialchars(
+                        $requirements
+                    ) ?></textarea>
+
+                </div>
+
+
+                <div class="form-group full">
+
+                    <label for="required_skills">
+                        Required Skills
+                    </label>
+
+                    <textarea
+                        name="required_skills"
+                        id="required_skills"
+                        placeholder="Example: Microsoft Excel, Data Encoding, Customer Service"
+                        required
+                    ><?= htmlspecialchars(
+                        $requiredSkills
+                    ) ?></textarea>
+
+                    <small class="help">
+                        Separate skills using commas.
+                    </small>
+
+                </div>
+
 
                 <div class="form-group">
 
-
-                    <label>
-
-                        Application Deadline *
-
+                    <label for="employment_type">
+                        Employment Type
                     </label>
 
+                    <select
+                        name="employment_type"
+                        id="employment_type"
+                    >
+
+                        <?php foreach (
+                            [
+                                "Full-time",
+                                "Part-time",
+                                "Contract",
+                                "Internship",
+                                "Freelance"
+                            ]
+                            as
+                            $type
+                        ): ?>
+
+                            <option
+                                value="<?= $type ?>"
+                                <?= $employmentType === $type
+                                    ? "selected"
+                                    : ""
+                                ?>
+                            >
+                                <?= $type ?>
+                            </option>
+
+                        <?php endforeach; ?>
+
+                    </select>
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label for="application_deadline">
+                        Application Deadline
+                    </label>
 
                     <input
                         type="date"
                         name="application_deadline"
-                        required
-
-                        min="<?= date(
-                            "Y-m-d"
-                        ) ?>"
-
+                        id="application_deadline"
                         value="<?= htmlspecialchars(
                             $applicationDeadline
                         ) ?>"
+                        required
                     >
-
 
                 </div>
 
 
-                <!-- SALARY MIN -->
-
                 <div class="form-group">
 
-
-                    <label>
-
+                    <label for="salary_min">
                         Minimum Salary
-
                     </label>
-
 
                     <input
                         type="number"
                         name="salary_min"
-
-                        min="0"
+                        id="salary_min"
                         step="0.01"
-
-                        placeholder="Example: 18000"
-
+                        min="0"
                         value="<?= htmlspecialchars(
                             $salaryMin
                         ) ?>"
                     >
 
-
                 </div>
 
 
-                <!-- SALARY MAX -->
-
                 <div class="form-group">
 
-
-                    <label>
-
+                    <label for="salary_max">
                         Maximum Salary
-
                     </label>
-
 
                     <input
                         type="number"
                         name="salary_max"
-
-                        min="0"
+                        id="salary_max"
                         step="0.01"
-
-                        placeholder="Example: 25000"
-
+                        min="0"
                         value="<?= htmlspecialchars(
                             $salaryMax
                         ) ?>"
                     >
 
-
                 </div>
 
-
-                <!-- DESCRIPTION -->
 
                 <div class="form-group full">
 
+                    <label class="checkbox">
 
-                    <label>
+                        <input
+                            type="checkbox"
+                            name="is_remote"
+                            value="1"
+                            <?= $isRemote
+                                ? "checked"
+                                : ""
+                            ?>
+                        >
 
-                        Job Description *
+                        Remote work available
 
                     </label>
 
-
-                    <textarea
-                        name="job_description"
-                        required
-                        placeholder="Describe the responsibilities and duties of the position..."
-                    ><?= htmlspecialchars(
-                        $jobDescription
-                    ) ?></textarea>
-
-
                 </div>
 
-
-                <!-- REQUIREMENTS -->
 
                 <div class="form-group full">
 
-
-                    <label>
-
-                        Requirements
-
+                    <label for="lgu_job_category">
+                        Job Category
                     </label>
 
-
-                    <textarea
-                        name="requirements"
-                        placeholder="Example: High school graduate, good communication skills, willing to work on-site..."
-                    ><?= htmlspecialchars(
-                        $requirements
-                    ) ?></textarea>
-
+                    <input
+                        type="text"
+                        name="lgu_job_category"
+                        id="lgu_job_category"
+                        value="<?= htmlspecialchars(
+                            $lguJobCategory
+                        ) ?>"
+                        placeholder="Example: Administrative, IT, Healthcare, Skilled Work"
+                    >
 
                 </div>
-
 
             </div>
-
 
         </div>
 
 
-        <!-- =================================================
-             VERIFIED JOB LOCATION
-        ================================================== -->
-
         <div class="card">
 
-
             <h2>
-
-                Job Location
-
+                Education Requirement
             </h2>
-
-
-            <p class="card-description">
-
-                This job will use the verified
-                business location from your
-                employer profile.
-
-            </p>
-
-
-            <!-- VERIFIED MESSAGE -->
-
-            <div class="location-box">
-
-
-                <h3>
-
-                    ✓ Verified Employer Location
-
-                </h3>
-
-
-                <p>
-
-                    This location was submitted
-                    through your employer profile
-                    and approved as part of your
-                    employer verification.
-
-                </p>
-
-
-                <span class="verified-badge">
-
-                    VERIFIED LOCATION
-
-                </span>
-
-
-            </div>
-
-
-            <!-- =================================================
-                 COMPLETE ADDRESS
-            ================================================== -->
 
             <div class="form-group">
 
-
-                <label>
-
-                    Complete Address
-
+                <label for="requires_education">
+                    Does this job require formal education?
                 </label>
 
+                <select
+                    name="requires_education"
+                    id="requires_education"
+                    onchange="toggleEducation()"
+                >
 
-                <textarea
-                    class="readonly"
-                    readonly
-                ><?= htmlspecialchars(
-                    $verifiedAddress
-                ) ?></textarea>
+                    <option
+                        value="no"
+                        <?= $requiresEducation === "no"
+                            ? "selected"
+                            : ""
+                        ?>
+                    >
+                        No
+                    </option>
 
+                    <option
+                        value="yes"
+                        <?= $requiresEducation === "yes"
+                            ? "selected"
+                            : ""
+                        ?>
+                    >
+                        Yes
+                    </option>
+
+                </select>
 
             </div>
 
 
-            <!-- =================================================
-                 BARANGAY + AREA
-            ================================================== -->
+            <div
+                id="educationFields"
+                class="optional"
+            >
 
-            <div class="form-grid">
+                <div class="form-grid">
 
+                    <div class="form-group">
 
-                <!-- BARANGAY -->
+                        <label for="educational_requirement">
+                            Educational Attainment
+                        </label>
 
-                <div class="form-group">
-
-
-                    <label>
-
-                        Barangay
-
-                    </label>
-
-
-                    <input
-                        type="text"
-                        class="readonly"
-                        readonly
-
-                        value="<?= htmlspecialchars(
-                            $verifiedBarangay
-                        ) ?>"
-                    >
-
-
-                </div>
-
-
-                <!-- CALOOCAN AREA -->
-
-                <div class="form-group">
-
-
-                    <label>
-
-                        Caloocan Area
-
-                    </label>
-
-
-                    <div>
-
-
-                        <span
-                            class="
-                                area-badge
-
-                                <?= $verifiedArea ===
-                                    "north"
-                                    ? "area-north"
-                                    : "area-south"
-                                ?>
-                            "
+                        <select
+                            name="educational_requirement"
+                            id="educational_requirement"
                         >
 
-                            <?= strtoupper(
-                                htmlspecialchars(
-                                    $verifiedArea
-                                )
-                            ) ?>
+                            <option value="">
+                                Select
+                            </option>
 
-                            CALOOCAN
+                            <?php foreach (
+                                [
+                                    "Elementary",
+                                    "Junior High School",
+                                    "Senior High School",
+                                    "Vocational",
+                                    "College Undergraduate",
+                                    "College Graduate",
+                                    "Postgraduate"
+                                ]
+                                as
+                                $education
+                            ): ?>
 
-                        </span>
+                                <option
+                                    value="<?= $education ?>"
+                                    <?= $educationalRequirement === $education
+                                        ? "selected"
+                                        : ""
+                                    ?>
+                                >
+                                    <?= $education ?>
+                                </option>
 
+                            <?php endforeach; ?>
+
+                        </select>
 
                     </div>
 
 
+                    <div class="form-group">
+
+                        <label for="required_degree">
+                            Required Degree / Program
+                        </label>
+
+                        <input
+                            type="text"
+                            name="required_degree"
+                            id="required_degree"
+                            value="<?= htmlspecialchars(
+                                $requiredDegree
+                            ) ?>"
+                            placeholder="Example: BS Information Technology"
+                        >
+
+                    </div>
+
+
+                    <div class="form-group full">
+
+                        <label for="degree_classification">
+                            Degree Classification / Field
+                        </label>
+
+                        <input
+                            type="text"
+                            name="degree_classification"
+                            id="degree_classification"
+                            value="<?= htmlspecialchars(
+                                $degreeClassification
+                            ) ?>"
+                            placeholder="Example: Information Technology"
+                        >
+
+                    </div>
+
                 </div>
 
-
             </div>
-
-
-            <!-- =================================================
-                 MAP
-
-                 Coordinates are still used internally.
-                 Latitude / Longitude are no longer displayed.
-            ================================================== -->
-
-            <iframe
-                id="map"
-
-                src="https://www.google.com/maps?q=<?= urlencode(
-                    $verifiedLatitude
-                ) ?>,<?= urlencode(
-                    $verifiedLongitude
-                ) ?>&z=17&output=embed"
-
-                loading="lazy"
-
-                allowfullscreen
-
-                referrerpolicy="no-referrer-when-downgrade"
-            ></iframe>
-
-
-            <!-- NOTE -->
-
-            <div class="note">
-
-
-                <strong>
-
-                    Note:
-
-                </strong>
-
-
-                The job location is automatically
-                taken from your verified employer
-                profile.
-
-
-                If your business location changes,
-                update your Employer Profile and
-                submit it for verification again.
-
-
-            </div>
-
 
         </div>
 
-
-        <!-- =================================================
-             SUBMIT
-        ================================================== -->
 
         <div class="card">
 
+            <h2>
+                TESDA / NC Requirement
+            </h2>
 
-            <div class="actions">
+            <div class="form-group">
 
+                <label for="requires_tesda">
+                    Does this job require TESDA / NC?
+                </label>
 
-                <a
-                    href="jobs.php"
-                    class="
-                        btn
-                        btn-secondary
-                    "
+                <select
+                    name="requires_tesda"
+                    id="requires_tesda"
+                    onchange="toggleTesda()"
                 >
 
-                    Cancel
+                    <option
+                        value="no"
+                        <?= $requiresTesda === "no"
+                            ? "selected"
+                            : ""
+                        ?>
+                    >
+                        No
+                    </option>
 
-                </a>
+                    <option
+                        value="yes"
+                        <?= $requiresTesda === "yes"
+                            ? "selected"
+                            : ""
+                        ?>
+                    >
+                        Yes
+                    </option>
 
-
-                <button
-                    type="submit"
-                    class="btn"
-                >
-
-                    Submit Job for Approval
-
-                </button>
-
+                </select>
 
             </div>
 
 
+            <div
+                id="tesdaFields"
+                class="optional"
+            >
+
+                <div class="form-grid">
+
+                    <div class="form-group">
+
+                        <label for="tesda_qualification">
+                            TESDA Qualification
+                        </label>
+
+                        <input
+                            type="text"
+                            name="tesda_qualification"
+                            id="tesda_qualification"
+                            value="<?= htmlspecialchars(
+                                $tesdaQualification
+                            ) ?>"
+                            placeholder="Example: Computer Systems Servicing"
+                        >
+
+                    </div>
+
+
+                    <div class="form-group">
+
+                        <label for="required_nc_level">
+                            Required NC Level
+                        </label>
+
+                        <select
+                            name="required_nc_level"
+                            id="required_nc_level"
+                        >
+
+                            <option value="">
+                                Select
+                            </option>
+
+                            <?php foreach (
+                                [
+                                    "NC I",
+                                    "NC II",
+                                    "NC III",
+                                    "NC IV"
+                                ]
+                                as
+                                $level
+                            ): ?>
+
+                                <option
+                                    value="<?= $level ?>"
+                                    <?= $requiredNcLevel === $level
+                                        ? "selected"
+                                        : ""
+                                    ?>
+                                >
+                                    <?= $level ?>
+                                </option>
+
+                            <?php endforeach; ?>
+
+                        </select>
+
+                    </div>
+
+                </div>
+
+            </div>
+
         </div>
 
 
-    </form>
+        <div class="card">
 
+            <h2>
+                Work Location
+            </h2>
+
+            <p>
+                <strong>Address:</strong>
+                <?= htmlspecialchars(
+                    $jobAddress
+                ) ?>
+            </p>
+
+            <p>
+                <strong>Barangay:</strong>
+                <?= htmlspecialchars(
+                    $jobBarangay
+                ) ?>
+            </p>
+
+            <p>
+                <strong>Area:</strong>
+                <?= ucfirst(
+                    htmlspecialchars(
+                        $jobArea
+                    )
+                ) ?>
+                Caloocan
+            </p>
+
+            <small class="help">
+                Job location is automatically taken
+                from your verified employer profile.
+            </small>
+
+        </div>
+
+
+        <div class="actions">
+
+            <button
+                type="submit"
+                class="btn btn-primary"
+            >
+                Submit for Approval
+            </button>
+
+            <a
+                href="jobs.php"
+                class="btn btn-secondary"
+            >
+                Cancel
+            </a>
+
+        </div>
+
+    </form>
 
 </div>
 
 
-</body>
+<script>
 
+function toggleSourceFields() {
+    const type =
+        document.getElementById(
+            "posting_type"
+        ).value;
+
+    const fields =
+        document.getElementById(
+            "sourceFields"
+        );
+
+    const sourceName =
+        document.getElementById(
+            "source_name"
+        );
+
+    if (type === "job_fair") {
+        fields.style.display = "block";
+        sourceName.required = true;
+    } else {
+        fields.style.display = "none";
+        sourceName.required = false;
+    }
+}
+
+
+function toggleEducation() {
+    const value =
+        document.getElementById(
+            "requires_education"
+        ).value;
+
+    const fields =
+        document.getElementById(
+            "educationFields"
+        );
+
+    const attainment =
+        document.getElementById(
+            "educational_requirement"
+        );
+
+    if (value === "yes") {
+        fields.style.display = "block";
+        attainment.required = true;
+    } else {
+        fields.style.display = "none";
+        attainment.required = false;
+    }
+}
+
+
+function toggleTesda() {
+    const value =
+        document.getElementById(
+            "requires_tesda"
+        ).value;
+
+    const fields =
+        document.getElementById(
+            "tesdaFields"
+        );
+
+    const qualification =
+        document.getElementById(
+            "tesda_qualification"
+        );
+
+    const nc =
+        document.getElementById(
+            "required_nc_level"
+        );
+
+    if (value === "yes") {
+        fields.style.display = "block";
+        qualification.required = true;
+        nc.required = true;
+    } else {
+        fields.style.display = "none";
+        qualification.required = false;
+        nc.required = false;
+    }
+}
+
+
+document.addEventListener(
+    "DOMContentLoaded",
+    function () {
+        toggleSourceFields();
+        toggleEducation();
+        toggleTesda();
+    }
+);
+
+</script>
+
+</body>
 </html>

@@ -4,13 +4,15 @@ session_start();
 
 require_once "../config/database.php";
 
-if (!isset($_SESSION["user_id"]) || $_SESSION["role"] !== "applicant") {
+if (
+    !isset($_SESSION["user_id"]) ||
+    ($_SESSION["role"] ?? "") !== "applicant"
+) {
     header("Location: ../login.php");
     exit;
 }
 
-$userId = $_SESSION["user_id"];
-
+$userId = (int) $_SESSION["user_id"];
 $applicationId = isset($_GET["id"])
     ? (int) $_GET["id"]
     : 0;
@@ -22,7 +24,7 @@ if ($applicationId <= 0) {
 
 /*
 |--------------------------------------------------------------------------
-| Get applicant ID
+| GET APPLICANT
 |--------------------------------------------------------------------------
 */
 
@@ -35,18 +37,18 @@ $stmt = $pdo->prepare("
 
 $stmt->execute([$userId]);
 
-$applicant = $stmt->fetch();
+$applicant = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$applicant) {
     die("Applicant profile not found.");
 }
 
-$applicantId = $applicant["id"];
+$applicantId = (int) $applicant["id"];
 
 
 /*
 |--------------------------------------------------------------------------
-| Get application
+| GET APPLICATION
 |--------------------------------------------------------------------------
 */
 
@@ -62,13 +64,31 @@ $stmt = $pdo->prepare("
         am.skills_score,
         am.experience_score,
         am.education_score,
+        am.tesda_score,
         am.matched_skills,
         am.missing_skills,
+        am.qualification_explanation,
+        am.matched_qualifications,
+        am.missing_qualifications,
+        am.skill_gap_feedback,
 
         j.id AS job_id,
         j.job_title,
-        j.description,
+
+        COALESCE(
+            NULLIF(j.job_description, ''),
+            j.description
+        ) AS description,
+
         j.requirements,
+        j.required_skills,
+        j.educational_requirement,
+        j.required_degree,
+        j.degree_classification,
+        j.tesda_qualification,
+        j.required_nc_level,
+        j.job_source,
+        j.source_name,
         j.location,
         j.employment_type,
         j.salary_min,
@@ -89,8 +109,9 @@ $stmt = $pdo->prepare("
     LEFT JOIN application_matches am
         ON ap.id = am.application_id
 
-    WHERE ap.id = ?
-    AND ap.applicant_id = ?
+    WHERE
+        ap.id = ?
+        AND ap.applicant_id = ?
 
     LIMIT 1
 ");
@@ -100,38 +121,78 @@ $stmt->execute([
     $applicantId
 ]);
 
-$application = $stmt->fetch();
+$application = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$application) {
     die("Application not found.");
 }
 
-$matchScore = $application["match_score"] ?? 0;
-$skillsScore = $application["skills_score"] ?? 0;
-$experienceScore = $application["experience_score"] ?? 0;
-$educationScore = $application["education_score"] ?? 0;
 
-$matchedSkillsList = [];
+/*
+|--------------------------------------------------------------------------
+| HELPERS
+|--------------------------------------------------------------------------
+*/
 
-if (!empty($application["matched_skills"])) {
-    $matchedSkillsList = array_filter(
-        array_map(
-            "trim",
-            explode(",", $application["matched_skills"])
+function clampScore($score): float
+{
+    return max(
+        0,
+        min(
+            100,
+            (float) ($score ?? 0)
         )
     );
 }
 
-$missingSkillsList = [];
+function splitMatchValues(?string $value): array
+{
+    if ($value === null || trim($value) === "") {
+        return [];
+    }
 
-if (!empty($application["missing_skills"])) {
-    $missingSkillsList = array_filter(
-        array_map(
-            "trim",
-            explode(",", $application["missing_skills"])
+    return array_values(
+        array_filter(
+            array_map(
+                "trim",
+                preg_split('/[,;\r\n|]+/', $value)
+            )
         )
     );
 }
+
+
+$matchScore = clampScore(
+    $application["match_score"] ?? 0
+);
+
+$skillsScore = clampScore(
+    $application["skills_score"] ?? 0
+);
+
+$educationScore = clampScore(
+    $application["education_score"] ?? 0
+);
+
+$tesdaScore = clampScore(
+    $application["tesda_score"] ?? 0
+);
+
+$matchedSkills = splitMatchValues(
+    $application["matched_skills"] ?? null
+);
+
+$missingSkills = splitMatchValues(
+    $application["missing_skills"] ?? null
+);
+
+$matchedQualifications = splitMatchValues(
+    $application["matched_qualifications"] ?? null
+);
+
+$missingQualifications = splitMatchValues(
+    $application["missing_qualifications"] ?? null
+);
 
 ?>
 
@@ -139,7 +200,6 @@ if (!empty($application["missing_skills"])) {
 <html lang="en">
 
 <head>
-
     <meta charset="UTF-8">
 
     <meta
@@ -152,7 +212,6 @@ if (!empty($application["missing_skills"])) {
     </title>
 
     <style>
-
         * {
             box-sizing: border-box;
             margin: 0;
@@ -160,78 +219,39 @@ if (!empty($application["missing_skills"])) {
         }
 
         body {
-            font-family: Arial, sans-serif;
+            font-family: Arial, Helvetica, sans-serif;
             background: #f5f7fb;
             color: #333;
         }
 
-        .navbar {
-            background: #fff;
-            border-bottom: 1px solid #ddd;
-            padding: 16px 40px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .logo {
-            font-size: 24px;
-            font-weight: bold;
-            color: #2563eb;
-        }
-
-        .nav-links {
-            display: flex;
-            gap: 20px;
-        }
-
-        .nav-links a {
-            text-decoration: none;
-            color: #333;
-        }
-
-        .nav-links a:hover {
-            color: #2563eb;
-        }
-
         .container {
-            max-width: 1000px;
+            max-width: 1050px;
             margin: 40px auto;
-            padding: 0 20px;
+            padding: 0 20px 50px;
         }
 
-        .back {
+        .back-link {
             display: inline-block;
             margin-bottom: 20px;
             color: #2563eb;
             text-decoration: none;
         }
 
-        .back:hover {
-            text-decoration: underline;
-        }
-
         .card {
-            background: white;
-            padding: 30px;
+            background: #fff;
+            padding: 28px;
+            margin-bottom: 22px;
             border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-            margin-bottom: 25px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
         }
 
-        h1 {
-            margin-bottom: 10px;
-        }
-
-        h2 {
-            margin-bottom: 15px;
-        }
-
+        h1,
+        h2,
         h3 {
-            margin-bottom: 10px;
+            margin-bottom: 12px;
         }
 
-        .company {
+        .company-name {
             color: #555;
             font-size: 18px;
             margin-bottom: 15px;
@@ -239,14 +259,14 @@ if (!empty($application["missing_skills"])) {
 
         .meta {
             display: flex;
-            gap: 15px;
             flex-wrap: wrap;
-            margin-bottom: 20px;
+            gap: 10px;
+            margin-bottom: 15px;
         }
 
-        .meta span {
-            background: #f1f5f9;
+        .meta-item {
             padding: 8px 12px;
+            background: #f1f5f9;
             border-radius: 6px;
             font-size: 14px;
         }
@@ -254,9 +274,10 @@ if (!empty($application["missing_skills"])) {
         .status {
             display: inline-block;
             padding: 8px 14px;
+            margin-bottom: 15px;
             border-radius: 20px;
             font-weight: bold;
-            margin-bottom: 20px;
+            font-size: 13px;
         }
 
         .pending {
@@ -284,6 +305,11 @@ if (!empty($application["missing_skills"])) {
             color: #065f46;
         }
 
+        .date {
+            color: #666;
+            font-size: 14px;
+        }
+
         .section {
             margin-top: 25px;
         }
@@ -293,526 +319,580 @@ if (!empty($application["missing_skills"])) {
             white-space: pre-line;
         }
 
-        .date {
-            color: #666;
-            font-size: 14px;
-        }
-
-        .match-box {
-            background: #f8fafc;
-            padding: 25px;
-            border-radius: 10px;
-            margin-top: 15px;
-            text-align: center;
-        }
-
-        .match-score {
-            font-size: 42px;
-            font-weight: bold;
-            color: #2563eb;
-        }
-
-        .match-label {
-            color: #666;
-            margin-top: 5px;
-        }
-
-        .skills-container {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-        }
-
-        .matched-skill {
-            background: #dcfce7;
-            color: #166534;
-            padding: 8px 12px;
-            border-radius: 20px;
-            font-size: 14px;
-        }
-
-        .missing-skill {
-            background: #fee2e2;
-            color: #991b1b;
-            padding: 8px 12px;
-            border-radius: 20px;
-            font-size: 14px;
-        }
-
-        .breakdown {
+        .requirement-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
             margin-top: 20px;
         }
 
-        .breakdown-item {
+        .requirement-item {
+            padding: 14px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+        }
+
+        .requirement-label {
+            display: block;
+            margin-bottom: 5px;
+            color: #64748b;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .match-box {
+            padding: 24px;
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 10px;
+        }
+
+        .match-header {
             display: flex;
             justify-content: space-between;
-            padding: 12px 0;
-            border-bottom: 1px solid #eee;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 15px;
         }
 
-        .breakdown-item:last-child {
-            border-bottom: none;
-        }
-
-        .breakdown-value {
-            font-weight: bold;
+        .match-score {
             color: #2563eb;
+            font-size: 42px;
+            font-weight: bold;
         }
 
-        .btn {
-            display: inline-block;
-            padding: 10px 16px;
+        .progress {
+            height: 11px;
+            margin-bottom: 20px;
+            overflow: hidden;
+            background: #dbeafe;
+            border-radius: 20px;
+        }
+
+        .progress-bar {
+            height: 100%;
             background: #2563eb;
-            color: white;
-            text-decoration: none;
-            border-radius: 6px;
         }
 
-        .btn:hover {
-            background: #1d4ed8;
+        .score-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
         }
 
-        @media (max-width: 768px) {
+        .score-card {
+            padding: 14px;
+            background: #fff;
+            border: 1px solid #dbeafe;
+            border-radius: 7px;
+            text-align: center;
+        }
 
-            .navbar {
-                padding: 15px 20px;
+        .score-card span {
+            display: block;
+            margin-bottom: 5px;
+            color: #64748b;
+            font-size: 12px;
+        }
+
+        .score-card strong {
+            color: #2563eb;
+            font-size: 20px;
+        }
+
+        .chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .chip {
+            padding: 8px 12px;
+            border-radius: 20px;
+            font-size: 13px;
+        }
+
+        .chip-good {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .chip-missing {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .explanation-box {
+            padding: 16px;
+            margin-top: 20px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            color: #475569;
+            line-height: 1.7;
+        }
+
+        .skill-gap-box {
+            padding: 16px;
+            margin-top: 20px;
+            background: #fff7ed;
+            border: 1px solid #fed7aa;
+            border-radius: 8px;
+            color: #9a3412;
+            line-height: 1.7;
+        }
+
+        .muted {
+            color: #777;
+        }
+
+        @media (max-width: 700px) {
+            .requirement-grid,
+            .score-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .match-header {
                 flex-direction: column;
-                gap: 15px;
-            }
-
-            .nav-links {
-                flex-wrap: wrap;
-                justify-content: center;
-            }
-
-            .container {
-                margin: 25px auto;
+                align-items: flex-start;
             }
 
             .card {
                 padding: 20px;
             }
-
-            .breakdown-item {
-                gap: 15px;
-            }
-
         }
-
     </style>
-
 </head>
 
 <body>
 
-
-<nav class="navbar">
-
-    <div class="logo">
-        JobPortal
-    </div>
-
-    <div class="nav-links">
-
-        <a href="dashboard.php">
-            Dashboard
-        </a>
-
-        <a href="applications.php">
-            Applications
-        </a>
-
-        <a href="../jobs/index.php">
-            Find Jobs
-        </a>
-
-        <a href="../logout.php">
-            Logout
-        </a>
-
-    </div>
-
-</nav>
-
+<?php require __DIR__ . "/includes/header.php"; ?>
 
 <div class="container">
 
     <a
         href="applications.php"
-        class="back"
+        class="back-link"
     >
-        ← Back to Applications
+        &larr; Back to Applications
     </a>
 
-
-    <!--
-    |--------------------------------------------------------------------------
-    | Application Summary
-    |--------------------------------------------------------------------------
-    -->
 
     <div class="card">
 
         <h1>
-            <?= htmlspecialchars(
-                $application["job_title"]
-            ) ?>
+            <?= htmlspecialchars($application["job_title"]) ?>
         </h1>
 
-        <div class="company">
-
-            <?= htmlspecialchars(
-                $application["company_name"]
-            ) ?>
-
+        <div class="company-name">
+            <?= htmlspecialchars($application["company_name"]) ?>
         </div>
 
 
         <div class="meta">
 
-            <span>
-
-                📍
-
+            <span class="meta-item">
                 <?= htmlspecialchars(
                     $application["location"] ?? "Not specified"
                 ) ?>
-
             </span>
 
-
-            <span>
-
-                💼
-
+            <span class="meta-item">
                 <?= htmlspecialchars(
                     $application["employment_type"]
                 ) ?>
-
             </span>
 
-
             <?php if ($application["is_remote"]): ?>
-
-                <span>
-                    🌐 Remote
+                <span class="meta-item">
+                    Remote
                 </span>
-
             <?php endif; ?>
+
+            <span class="meta-item">
+                Source:
+                <?= htmlspecialchars(
+                    ucwords(
+                        str_replace(
+                            "_",
+                            " ",
+                            $application["job_source"]
+                            ?? "private_employer"
+                        )
+                    )
+                ) ?>
+            </span>
 
         </div>
 
 
         <div>
-
             <span
                 class="status <?= htmlspecialchars(
                     $application["status"]
                 ) ?>"
             >
-
                 <?= ucfirst(
                     htmlspecialchars(
                         $application["status"]
                     )
                 ) ?>
-
             </span>
-
         </div>
 
 
         <div class="date">
-
             Applied:
-
             <?= date(
                 "F d, Y h:i A",
                 strtotime(
                     $application["applied_at"]
                 )
             ) ?>
-
         </div>
 
     </div>
 
 
-    <!--
-    |--------------------------------------------------------------------------
-    | Job Description
-    |--------------------------------------------------------------------------
-    -->
-
     <div class="card">
 
-        <h2>
-            Job Description
-        </h2>
+        <h2>Job Description</h2>
 
         <div class="section">
-
-            <p>
-                <?= htmlspecialchars(
-                    $application["description"]
-                ) ?>
-            </p>
-
+            <p><?= htmlspecialchars(
+                $application["description"]
+            ) ?></p>
         </div>
 
 
         <?php if (!empty($application["requirements"])): ?>
 
             <div class="section">
+                <h3>General Requirements</h3>
 
-                <h2>
-                    Requirements
-                </h2>
-
-                <p>
-                    <?= htmlspecialchars(
-                        $application["requirements"]
-                    ) ?>
-                </p>
-
+                <p><?= htmlspecialchars(
+                    $application["requirements"]
+                ) ?></p>
             </div>
 
         <?php endif; ?>
 
 
-        <?php if (
-            $application["salary_min"] !== null ||
-            $application["salary_max"] !== null
-        ): ?>
+        <div class="requirement-grid">
 
-            <div class="section">
+            <div class="requirement-item">
+                <span class="requirement-label">
+                    Required Skills
+                </span>
 
-                <h2>
-                    Salary
-                </h2>
-
-                <p>
-
-                    <?php if (
-                        $application["salary_min"] !== null
-                    ): ?>
-
-                        ₱<?= number_format(
-                            $application["salary_min"],
-                            2
-                        ) ?>
-
-                    <?php endif; ?>
-
-
-                    <?php if (
-                        $application["salary_min"] !== null &&
-                        $application["salary_max"] !== null
-                    ): ?>
-
-                        -
-
-                    <?php endif; ?>
-
-
-                    <?php if (
-                        $application["salary_max"] !== null
-                    ): ?>
-
-                        ₱<?= number_format(
-                            $application["salary_max"],
-                            2
-                        ) ?>
-
-                    <?php endif; ?>
-
-                </p>
-
+                <?= nl2br(
+                    htmlspecialchars(
+                        $application["required_skills"]
+                            ?: "Not specified"
+                    )
+                ) ?>
             </div>
 
-        <?php endif; ?>
+
+            <div class="requirement-item">
+                <span class="requirement-label">
+                    Educational Requirement
+                </span>
+
+                <?= htmlspecialchars(
+                    $application["educational_requirement"]
+                        ?: "No specific requirement"
+                ) ?>
+            </div>
+
+
+            <div class="requirement-item">
+                <span class="requirement-label">
+                    Required Degree / Program
+                </span>
+
+                <?= htmlspecialchars(
+                    $application["required_degree"]
+                        ?: "No specific degree"
+                ) ?>
+            </div>
+
+
+            <div class="requirement-item">
+                <span class="requirement-label">
+                    Degree Classification
+                </span>
+
+                <?= htmlspecialchars(
+                    $application["degree_classification"]
+                        ?: "Not specified"
+                ) ?>
+            </div>
+
+
+            <div class="requirement-item">
+                <span class="requirement-label">
+                    TESDA Qualification
+                </span>
+
+                <?= htmlspecialchars(
+                    $application["tesda_qualification"]
+                        ?: "Not required"
+                ) ?>
+            </div>
+
+
+            <div class="requirement-item">
+                <span class="requirement-label">
+                    Required NC Level
+                </span>
+
+                <?= htmlspecialchars(
+                    $application["required_nc_level"]
+                        ?: "No NC Required"
+                ) ?>
+            </div>
+
+        </div>
 
     </div>
 
 
-    <!--
-    |--------------------------------------------------------------------------
-    | Resume Match Result
-    |--------------------------------------------------------------------------
-    -->
-
     <div class="card">
 
-        <h2>
-            Resume Match Result
-        </h2>
-
+        <h2>Explainable Job Match</h2>
 
         <div class="match-box">
 
-            <div class="match-score">
+            <div class="match-header">
 
-                <?= number_format(
-                    $matchScore,
-                    2
-                ) ?>%
+                <div>
+                    <h3>Overall Match</h3>
+
+                    <p class="muted">
+                        Based on your resume skills,
+                        education, and TESDA/NC qualifications.
+                    </p>
+                </div>
+
+                <div class="match-score">
+                    <?= number_format(
+                        $matchScore,
+                        0
+                    ) ?>%
+                </div>
 
             </div>
 
-            <div class="match-label">
 
-                Overall Resume Match
-
+            <div class="progress">
+                <div
+                    class="progress-bar"
+                    style="width: <?= $matchScore ?>%;"
+                ></div>
             </div>
 
-        </div>
 
+            <div class="score-grid">
 
-        <!-- Matched Skills -->
+                <div class="score-card">
+                    <span>Skills</span>
 
-        <div class="section">
-
-            <h2>
-                Matched Skills
-            </h2>
-
-
-            <?php if (!empty($matchedSkillsList)): ?>
-
-                <div class="skills-container">
-
-                    <?php foreach (
-                        $matchedSkillsList as $skill
-                    ): ?>
-
-                        <span class="matched-skill">
-
-                            ✓
-                            <?= htmlspecialchars(
-                                $skill
-                            ) ?>
-
-                        </span>
-
-                    <?php endforeach; ?>
-
-                </div>
-
-            <?php else: ?>
-
-                <p>
-                    No matched skills found.
-                </p>
-
-            <?php endif; ?>
-
-        </div>
-
-
-        <!-- Missing Skills -->
-
-        <div class="section">
-
-            <h2>
-                Missing Skills
-            </h2>
-
-
-            <?php if (!empty($missingSkillsList)): ?>
-
-                <div class="skills-container">
-
-                    <?php foreach (
-                        $missingSkillsList as $skill
-                    ): ?>
-
-                        <span class="missing-skill">
-
-                            ✕
-                            <?= htmlspecialchars(
-                                $skill
-                            ) ?>
-
-                        </span>
-
-                    <?php endforeach; ?>
-
-                </div>
-
-            <?php else: ?>
-
-                <p>
-                    Great! No missing skills detected.
-                </p>
-
-            <?php endif; ?>
-
-        </div>
-
-
-        <!-- Match Breakdown -->
-
-        <div class="section">
-
-            <h2>
-                Match Breakdown
-            </h2>
-
-
-            <div class="breakdown">
-
-                <div class="breakdown-item">
-
-                    <span>
-                        Skills Match
-                    </span>
-
-                    <span class="breakdown-value">
-
+                    <strong>
                         <?= number_format(
                             $skillsScore,
-                            2
+                            0
                         ) ?>%
-
-                    </span>
-
+                    </strong>
                 </div>
 
 
-                <div class="breakdown-item">
+                <div class="score-card">
+                    <span>Education</span>
 
-                    <span>
-                        Experience Match
-                    </span>
-
-                    <span class="breakdown-value">
-
-                        <?= number_format(
-                            $experienceScore,
-                            2
-                        ) ?>%
-
-                    </span>
-
-                </div>
-
-
-                <div class="breakdown-item">
-
-                    <span>
-                        Education Match
-                    </span>
-
-                    <span class="breakdown-value">
-
+                    <strong>
                         <?= number_format(
                             $educationScore,
-                            2
+                            0
                         ) ?>%
-
-                    </span>
-
+                    </strong>
                 </div>
+
+
+                <div class="score-card">
+                    <span>TESDA / NC</span>
+
+                    <strong>
+                        <?= number_format(
+                            $tesdaScore,
+                            0
+                        ) ?>%
+                    </strong>
+                </div>
+
+            </div>
+
+
+            <div class="section">
+
+                <h3>Matched Skills</h3>
+
+                <?php if (!empty($matchedSkills)): ?>
+
+                    <div class="chips">
+                        <?php foreach ($matchedSkills as $skill): ?>
+
+                            <span class="chip chip-good">
+                                <?= htmlspecialchars($skill) ?>
+                            </span>
+
+                        <?php endforeach; ?>
+                    </div>
+
+                <?php else: ?>
+
+                    <p class="muted">
+                        No matched skills recorded.
+                    </p>
+
+                <?php endif; ?>
+
+            </div>
+
+
+            <div class="section">
+
+                <h3>Missing Skills</h3>
+
+                <?php if (!empty($missingSkills)): ?>
+
+                    <div class="chips">
+                        <?php foreach ($missingSkills as $skill): ?>
+
+                            <span class="chip chip-missing">
+                                <?= htmlspecialchars($skill) ?>
+                            </span>
+
+                        <?php endforeach; ?>
+                    </div>
+
+                <?php else: ?>
+
+                    <p class="muted">
+                        No missing skills detected.
+                    </p>
+
+                <?php endif; ?>
+
+            </div>
+
+
+            <div class="section">
+
+                <h3>Matched Qualifications</h3>
+
+                <?php if (!empty($matchedQualifications)): ?>
+
+                    <div class="chips">
+                        <?php foreach ($matchedQualifications as $qualification): ?>
+
+                            <span class="chip chip-good">
+                                <?= htmlspecialchars($qualification) ?>
+                            </span>
+
+                        <?php endforeach; ?>
+                    </div>
+
+                <?php else: ?>
+
+                    <p class="muted">
+                        No matched qualifications recorded.
+                    </p>
+
+                <?php endif; ?>
+
+            </div>
+
+
+            <div class="section">
+
+                <h3>Missing Qualifications</h3>
+
+                <?php if (!empty($missingQualifications)): ?>
+
+                    <div class="chips">
+                        <?php foreach ($missingQualifications as $qualification): ?>
+
+                            <span class="chip chip-missing">
+                                <?= htmlspecialchars($qualification) ?>
+                            </span>
+
+                        <?php endforeach; ?>
+                    </div>
+
+                <?php else: ?>
+
+                    <p class="muted">
+                        No missing qualifications detected.
+                    </p>
+
+                <?php endif; ?>
+
+            </div>
+
+
+            <div class="explanation-box">
+
+                <strong>Why You Matched</strong>
+
+                <br>
+
+                <?php if (!empty(
+                    $application["qualification_explanation"]
+                )): ?>
+
+                    <?= nl2br(
+                        htmlspecialchars(
+                            $application[
+                                "qualification_explanation"
+                            ]
+                        )
+                    ) ?>
+
+                <?php else: ?>
+
+                    No qualification explanation is
+                    available for this application.
+
+                <?php endif; ?>
+
+            </div>
+
+
+            <div class="skill-gap-box">
+
+                <strong>Skill Gap Feedback</strong>
+
+                <br>
+
+                <?php if (!empty(
+                    $application["skill_gap_feedback"]
+                )): ?>
+
+                    <?= nl2br(
+                        htmlspecialchars(
+                            $application["skill_gap_feedback"]
+                        )
+                    ) ?>
+
+                <?php else: ?>
+
+                    No skill-gap feedback is
+                    available for this application.
+
+                <?php endif; ?>
 
             </div>
 
@@ -821,101 +901,23 @@ if (!empty($application["missing_skills"])) {
     </div>
 
 
-    <!--
-    |--------------------------------------------------------------------------
-    | Cover Letter
-    |--------------------------------------------------------------------------
-    -->
+    <?php if (!empty($application["cover_letter"])): ?>
 
-    <div class="card">
+        <div class="card">
 
-        <h2>
-            Your Cover Letter
-        </h2>
+            <h2>Your Cover Letter</h2>
 
-
-        <?php if (
-            !empty($application["cover_letter"])
-        ): ?>
-
-            <p
-                style="
-                    line-height:1.7;
-                    white-space:pre-line;
-                "
-            >
-
-                <?= htmlspecialchars(
+            <div class="section">
+                <p><?= htmlspecialchars(
                     $application["cover_letter"]
-                ) ?>
+                ) ?></p>
+            </div>
 
-            </p>
+        </div>
 
-        <?php else: ?>
-
-            <p>
-                No cover letter was submitted.
-            </p>
-
-        <?php endif; ?>
-
-    </div>
-
-
-    <!--
-    |--------------------------------------------------------------------------
-    | Company
-    |--------------------------------------------------------------------------
-    -->
-
-    <div class="card">
-
-        <h2>
-            Company
-        </h2>
-
-
-        <h3>
-
-            <?= htmlspecialchars(
-                $application["company_name"]
-            ) ?>
-
-        </h3>
-
-
-        <?php if (
-            !empty(
-                $application["company_description"]
-            )
-        ): ?>
-
-            <p
-                style="
-                    line-height:1.7;
-                    margin-top:10px;
-                "
-            >
-
-                <?= htmlspecialchars(
-                    $application["company_description"]
-                ) ?>
-
-            </p>
-
-        <?php else: ?>
-
-            <p>
-                No company description available.
-            </p>
-
-        <?php endif; ?>
-
-    </div>
-
+    <?php endif; ?>
 
 </div>
 
 </body>
-
 </html>

@@ -4,16 +4,9 @@ session_start();
 
 require_once "../config/database.php";
 
-
-/*
-|--------------------------------------------------------------------------
-| ADMIN ACCESS ONLY
-|--------------------------------------------------------------------------
-*/
-
 if (
     !isset($_SESSION["user_id"]) ||
-    $_SESSION["role"] !== "admin"
+    ($_SESSION["role"] ?? "") !== "admin"
 ) {
     header("Location: ../login.php");
     exit;
@@ -22,16 +15,15 @@ if (
 
 /*
 |--------------------------------------------------------------------------
-| GET ALL JOBS
+| GET JOBS
 |--------------------------------------------------------------------------
 */
 
 $stmt = $pdo->query("
-
     SELECT
-
         j.id,
         j.job_title,
+        j.job_source,
         j.location,
         j.address,
         j.barangay,
@@ -39,11 +31,16 @@ $stmt = $pdo->query("
         j.employment_type,
         j.salary_min,
         j.salary_max,
+        j.educational_requirement,
+        j.tesda_qualification,
+        j.required_nc_level,
         j.status,
         j.application_deadline,
         j.created_at,
 
         e.company_name,
+        e.employer_type,
+
         e.verification_status
             AS employer_verification_status,
 
@@ -58,47 +55,43 @@ $stmt = $pdo->query("
     INNER JOIN employers e
         ON j.employer_id = e.id
 
-    ORDER BY j.created_at DESC
-
+    ORDER BY
+        FIELD(
+            j.status,
+            'pending',
+            'approved',
+            'rejected',
+            'closed'
+        ),
+        j.created_at DESC
 ");
 
-
 $jobs =
-    $stmt->fetchAll(
-        PDO::FETCH_ASSOC
-    );
+    $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 
-/*
-|--------------------------------------------------------------------------
-| STATUS CLASS
-|--------------------------------------------------------------------------
-*/
-
-function jobStatusClass($status)
+function jobStatusClass(string $status): string
 {
-
     return match ($status) {
+        "approved" => "status-approved",
+        "rejected" => "status-rejected",
+        "closed" => "status-closed",
+        default => "status-pending"
+    };
+}
 
-        "approved" =>
-            "status-approved",
-
-        "rejected" =>
-            "status-rejected",
-
-        "closed" =>
-            "status-closed",
-
-        default =>
-            "status-pending"
+function sourceLabel(string $source): string
+{
+    return match ($source) {
+        "lgu" => "LGU",
+        "job_fair" => "Job Fair",
+        default => "Private Employer"
     };
 }
 
 ?>
 
-
 <!DOCTYPE html>
-
 <html lang="en">
 
 <head>
@@ -114,596 +107,168 @@ function jobStatusClass($status)
     Manage Jobs - Admin
 </title>
 
-
 <style>
-
-/*
-|--------------------------------------------------------------------------
-| BASE
-|--------------------------------------------------------------------------
-*/
-
 * {
-
-    box-sizing:
-        border-box;
-
-    margin:
-        0;
-
-    padding:
-        0;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
 }
-
 
 body {
-
-    font-family:
-        Arial,
-        Helvetica,
-        sans-serif;
-
-    background:
-        #f5f7fb;
-
-    color:
-        #222;
+    font-family: Arial, Helvetica, sans-serif;
+    background: #f5f7fb;
+    color: #222;
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| NAVBAR
-|--------------------------------------------------------------------------
-*/
-
-.navbar {
-
-    background:
-        #111827;
-
-    padding:
-        18px 50px;
-}
-
-
-.navbar-container {
-
-    max-width:
-        1200px;
-
-    margin:
-        auto;
-
-    display:
-        flex;
-
-    justify-content:
-        space-between;
-
-    align-items:
-        center;
-}
-
-
-.logo {
-
-    color:
-        white;
-
-    text-decoration:
-        none;
-
-    font-size:
-        22px;
-
-    font-weight:
-        bold;
-}
-
-
-.nav-links {
-
-    display:
-        flex;
-
-    gap:
-        20px;
-
-    align-items:
-        center;
-}
-
-
-.nav-links a {
-
-    color:
-        white;
-
-    text-decoration:
-        none;
-
-    font-size:
-        14px;
-}
-
-
-.nav-links a:hover {
-
-    color:
-        #93c5fd;
-}
-
-
-.logout {
-
-    background:
-        #dc2626;
-
-    padding:
-        8px 14px;
-
-    border-radius:
-        5px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| CONTAINER
-|--------------------------------------------------------------------------
-*/
 
 .container {
-
-    max-width:
-        1250px;
-
-    margin:
-        40px auto;
-
-    padding:
-        0 20px;
+    max-width: 1400px;
+    margin: 40px auto;
+    padding: 0 20px 50px;
 }
-
 
 .page-header {
-
-    margin-bottom:
-        30px;
+    margin-bottom: 25px;
 }
-
 
 .page-header h1 {
-
-    margin-bottom:
-        8px;
+    margin-bottom: 8px;
 }
-
 
 .page-header p {
-
-    color:
-        #666;
+    color: #666;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| NOTICE
-|--------------------------------------------------------------------------
-*/
-
-.location-notice {
-
-    background:
-        #eff6ff;
-
-    border:
-        1px solid #bfdbfe;
-
-    color:
-        #1e40af;
-
-    padding:
-        15px 18px;
-
-    border-radius:
-        8px;
-
-    margin-bottom:
-        20px;
-
-    line-height:
-        1.5;
+.notice {
+    margin-bottom: 20px;
+    padding: 15px 18px;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 8px;
+    color: #1e40af;
+    line-height: 1.6;
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| TABLE
-|--------------------------------------------------------------------------
-*/
 
 .table-container {
-
-    background:
-        white;
-
-    border-radius:
-        8px;
-
-    border:
-        1px solid #e5e7eb;
-
-    overflow-x:
-        auto;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    overflow-x: auto;
 }
-
 
 table {
-
-    width:
-        100%;
-
-    border-collapse:
-        collapse;
+    width: 100%;
+    border-collapse: collapse;
 }
-
 
 th,
 td {
-
-    padding:
-        15px;
-
-    text-align:
-        left;
-
-    border-bottom:
-        1px solid #eee;
-
-    vertical-align:
-        middle;
+    padding: 14px;
+    text-align: left;
+    border-bottom: 1px solid #eee;
+    vertical-align: middle;
 }
-
 
 th {
-
-    background:
-        #f9fafb;
-
-    font-size:
-        13px;
-
-    color:
-        #555;
+    background: #f9fafb;
+    font-size: 13px;
 }
-
 
 td {
-
-    font-size:
-        14px;
+    font-size: 14px;
 }
 
-
-tr:last-child td {
-
-    border-bottom:
-        none;
+.status,
+.badge {
+    display: inline-block;
+    padding: 5px 10px;
+    border-radius: 15px;
+    font-size: 12px;
+    font-weight: bold;
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| STATUS
-|--------------------------------------------------------------------------
-*/
-
-.status {
-
-    display:
-        inline-block;
-
-    padding:
-        5px 10px;
-
-    border-radius:
-        15px;
-
-    font-size:
-        12px;
-
-    font-weight:
-        bold;
-}
-
 
 .status-pending {
-
-    background:
-        #fef3c7;
-
-    color:
-        #92400e;
+    background: #fef3c7;
+    color: #92400e;
 }
-
 
 .status-approved {
-
-    background:
-        #dcfce7;
-
-    color:
-        #166534;
+    background: #dcfce7;
+    color: #166534;
 }
-
 
 .status-rejected {
-
-    background:
-        #fee2e2;
-
-    color:
-        #991b1b;
+    background: #fee2e2;
+    color: #991b1b;
 }
-
 
 .status-closed {
-
-    background:
-        #e5e7eb;
-
-    color:
-        #374151;
+    background: #e5e7eb;
+    color: #374151;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| AREA
-|--------------------------------------------------------------------------
-*/
-
-.area {
-
-    display:
-        inline-block;
-
-    padding:
-        5px 10px;
-
-    border-radius:
-        15px;
-
-    font-size:
-        12px;
-
-    font-weight:
-        bold;
+.source-private {
+    background: #e0e7ff;
+    color: #3730a3;
 }
 
-
-.north {
-
-    background:
-        #dbeafe;
-
-    color:
-        #1e40af;
+.source-lgu {
+    background: #dbeafe;
+    color: #1e40af;
 }
 
-
-.south {
-
-    background:
-        #dcfce7;
-
-    color:
-        #166534;
+.source-jobfair {
+    background: #f3e8ff;
+    color: #7e22ce;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| EMPLOYER
-|--------------------------------------------------------------------------
-*/
-
-.verified-employer {
-
-    color:
-        #166534;
-
-    font-size:
-        12px;
-
-    font-weight:
-        bold;
+.verified {
+    color: #166534;
+    font-size: 12px;
+    font-weight: bold;
 }
 
-
-.unverified-employer {
-
-    color:
-        #991b1b;
-
-    font-size:
-        12px;
-
-    font-weight:
-        bold;
+.unverified {
+    color: #991b1b;
+    font-size: 12px;
+    font-weight: bold;
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| BUTTON
-|--------------------------------------------------------------------------
-*/
 
 .btn {
-
-    display:
-        inline-block;
-
-    border:
-        none;
-
-    padding:
-        8px 13px;
-
-    border-radius:
-        5px;
-
-    cursor:
-        pointer;
-
-    font-size:
-        12px;
-
-    font-weight:
-        600;
-
-    text-decoration:
-        none;
+    display: inline-block;
+    padding: 8px 13px;
+    background: #2563eb;
+    color: #ffffff;
+    border-radius: 5px;
+    font-size: 12px;
+    font-weight: 600;
+    text-decoration: none;
 }
 
-
-.btn-view {
-
-    background:
-        #2563eb;
-
-    color:
-        white;
+.btn:hover {
+    background: #1d4ed8;
 }
 
-
-.btn-view:hover {
-
-    background:
-        #1d4ed8;
+.empty {
+    padding: 40px;
+    text-align: center;
+    color: #64748b;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| EMPTY
-|--------------------------------------------------------------------------
-*/
-
-.no-jobs {
-
-    text-align:
-        center;
-
-    padding:
-        40px;
-
-    color:
-        #777;
+.small {
+    margin-top: 5px;
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.5;
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| RESPONSIVE
-|--------------------------------------------------------------------------
-*/
-
-@media (max-width: 900px) {
-
-    .navbar {
-
-        padding:
-            15px 20px;
-    }
-
-
-    .navbar-container {
-
-        flex-direction:
-            column;
-
-        gap:
-            15px;
-
-        align-items:
-            flex-start;
-    }
-
-
-    .nav-links {
-
-        flex-wrap:
-            wrap;
-
-        gap:
-            12px;
-    }
-
-}
-
 </style>
 
 </head>
 
-
 <body>
 
-
-<!-- =========================================================
-     NAVBAR
-========================================================= -->
-
-<nav class="navbar">
-
-    <div class="navbar-container">
-
-        <a href="dashboard.php" class="logo">
-            Job Portal Admin
-        </a>
-
-        <div class="nav-links">
-
-            <a href="dashboard.php">
-                Dashboard
-            </a>
-
-            <a href="jobs.php">
-                Manage Jobs
-            </a>
-
-            <a href="employers.php">
-                Manage Employers
-            </a>
-
-            <a href="applicants.php">
-                Manage Applicants
-            </a>
-
-            <a href="reports.php">Manage Reports</a>
-
-            <a href="../logout.php" class="logout">
-                Logout
-            </a>
-
-        </div>
-
-    </div>
-
-</nav>
-
-
-
-<!-- =========================================================
-     MAIN
-========================================================= -->
+<?php require __DIR__ . "/includes/header.php"; ?>
 
 <div class="container">
-
 
     <div class="page-header">
 
@@ -712,347 +277,247 @@ tr:last-child td {
         </h1>
 
         <p>
-            Review employer job postings and manage their status.
+            Review, approve, reject and close employer job postings.
         </p>
 
     </div>
 
-
-
-    <div class="location-notice">
-
-        <strong>
-            📍 Caloocan City Job Portal
-        </strong>
-
-        <br>
-
-        Click
-        <strong>View</strong>
-        to review the complete job information,
-        employer verification, and location before approval.
-
+    <div class="notice">
+        Job source is automatically determined by the employer account.
+        Private employer accounts create Private Employer jobs while verified
+        LGU employer accounts create LGU jobs.
     </div>
-
-
 
     <div class="table-container">
 
         <table>
 
-
             <thead>
 
                 <tr>
-
-                    <th>
-                        Job Title
-                    </th>
-
-                    <th>
-                        Company
-                    </th>
-
-                    <th>
-                        Barangay
-                    </th>
-
-                    <th>
-                        Area
-                    </th>
-
-                    <th>
-                        Type
-                    </th>
-
-                    <th>
-                        Applicants
-                    </th>
-
-                    <th>
-                        Status
-                    </th>
-
-                    <th>
-                        Posted
-                    </th>
-
-                    <th>
-                        Action
-                    </th>
-
+                    <th>Job</th>
+                    <th>Employer</th>
+                    <th>Source</th>
+                    <th>Qualification</th>
+                    <th>Location</th>
+                    <th>Applicants</th>
+                    <th>Status</th>
+                    <th>Posted</th>
+                    <th>Action</th>
                 </tr>
 
             </thead>
 
-
-
             <tbody>
 
-
-            <?php if (
-                empty($jobs)
-            ): ?>
-
+            <?php if (empty($jobs)): ?>
 
                 <tr>
-
-                    <td
-                        colspan="9"
-                        class="no-jobs"
-                    >
-
+                    <td colspan="9" class="empty">
                         No jobs found.
-
                     </td>
-
                 </tr>
-
 
             <?php else: ?>
 
+                <?php foreach ($jobs as $job): ?>
 
-                <?php foreach (
-                    $jobs
-                    as $job
-                ): ?>
+                    <?php
+                    $source =
+                        $job["job_source"]
+                        ?? "private_employer";
 
+                    $sourceClass =
+                        $source === "lgu"
+                            ? "source-lgu"
+                            : (
+                                $source === "job_fair"
+                                    ? "source-jobfair"
+                                    : "source-private"
+                            );
+                    ?>
 
                     <tr>
-
-
-                        <!-- JOB TITLE -->
 
                         <td>
 
                             <strong>
-
                                 <?= htmlspecialchars(
-                                    $job[
-                                        "job_title"
-                                    ]
+                                    $job["job_title"]
                                 ) ?>
-
                             </strong>
 
-                        </td>
-
-
-
-                        <!-- COMPANY -->
-
-                        <td>
-
-                            <?= htmlspecialchars(
-                                $job[
-                                    "company_name"
-                                ]
-                            ) ?>
-
-
-                            <br>
-
-
-                            <?php if (
-                                $job[
-                                    "employer_verification_status"
-                                ] === "approved"
-                            ): ?>
-
-                                <span class="verified-employer">
-                                    ✓ Verified Employer
-                                </span>
-
-                            <?php else: ?>
-
-                                <span class="unverified-employer">
-                                    Not Verified
-                                </span>
-
-                            <?php endif; ?>
-
-                        </td>
-
-
-
-                        <!-- BARANGAY -->
-
-                        <td>
-
-                            <?= htmlspecialchars(
-                                $job[
-                                    "barangay"
-                                ]
-                                ?: "N/A"
-                            ) ?>
-
-                        </td>
-
-
-
-                        <!-- AREA -->
-
-                        <td>
-
-
-                            <?php if (
-                                !empty(
-                                    $job[
-                                        "caloocan_area"
-                                    ]
-                                )
-                            ): ?>
-
-
-                                <span
-                                    class="
-                                        area
-                                        <?= htmlspecialchars(
-                                            $job[
-                                                "caloocan_area"
-                                            ]
-                                        ) ?>
-                                    "
-                                >
-
-                                    <?= strtoupper(
-                                        htmlspecialchars(
-                                            $job[
-                                                "caloocan_area"
-                                            ]
-                                        )
-                                    ) ?>
-
-                                </span>
-
-
-                            <?php else: ?>
-
-                                N/A
-
-                            <?php endif; ?>
-
-
-                        </td>
-
-
-
-                        <!-- TYPE -->
-
-                        <td>
-
-                            <?= htmlspecialchars(
-                                $job[
-                                    "employment_type"
-                                ]
-                                ?: "N/A"
-                            ) ?>
-
-                        </td>
-
-
-
-                        <!-- APPLICANTS -->
-
-                        <td>
-
-                            <?= (int)
-                                $job[
-                                    "applicant_count"
-                                ]
-                            ?>
-
-                        </td>
-
-
-
-                        <!-- STATUS -->
-
-                        <td>
-
-                            <span
-                                class="
-                                    status
-                                    <?= jobStatusClass(
-                                        $job[
-                                            "status"
-                                        ]
-                                    ) ?>
-                                "
-                            >
-
-                                <?= strtoupper(
-                                    htmlspecialchars(
-                                        $job[
-                                            "status"
-                                        ]
-                                    )
+                            <div class="small">
+                                <?= htmlspecialchars(
+                                    $job["employment_type"]
                                 ) ?>
+                            </div>
 
+                        </td>
+
+                        <td>
+
+                            <?= htmlspecialchars(
+                                $job["company_name"]
+                            ) ?>
+
+                            <div>
+
+                                <?php if (
+                                    $job["employer_verification_status"]
+                                    === "approved"
+                                ): ?>
+
+                                    <span class="verified">
+                                        Verified
+                                    </span>
+
+                                <?php else: ?>
+
+                                    <span class="unverified">
+                                        Not Verified
+                                    </span>
+
+                                <?php endif; ?>
+
+                            </div>
+
+                        </td>
+
+                        <td>
+
+                            <span class="badge <?= $sourceClass ?>">
+                                <?= htmlspecialchars(
+                                    sourceLabel($source)
+                                ) ?>
                             </span>
 
                         </td>
 
+                        <td>
+
+                            <?php if (
+                                !empty(
+                                    $job["educational_requirement"]
+                                )
+                            ): ?>
+
+                                <div class="small">
+                                    Education:
+                                    <?= htmlspecialchars(
+                                        $job["educational_requirement"]
+                                    ) ?>
+                                </div>
+
+                            <?php endif; ?>
 
 
-                        <!-- POSTED -->
+                            <?php if (
+                                !empty(
+                                    $job["tesda_qualification"]
+                                )
+                            ): ?>
+
+                                <div class="small">
+                                    TESDA:
+                                    <?= htmlspecialchars(
+                                        $job["tesda_qualification"]
+                                    ) ?>
+
+                                    <?= htmlspecialchars(
+                                        $job["required_nc_level"]
+                                        ?? ""
+                                    ) ?>
+                                </div>
+
+                            <?php endif; ?>
+
+
+                            <?php if (
+                                empty(
+                                    $job["educational_requirement"]
+                                ) &&
+                                empty(
+                                    $job["tesda_qualification"]
+                                )
+                            ): ?>
+
+                                <span class="small">
+                                    Skills-based
+                                </span>
+
+                            <?php endif; ?>
+
+                        </td>
+
+                        <td>
+
+                            <?= htmlspecialchars(
+                                $job["location"]
+                                ?: "Caloocan City"
+                            ) ?>
+
+                        </td>
+
+                        <td>
+                            <?= (int)
+                                $job["applicant_count"]
+                            ?>
+                        </td>
+
+                        <td>
+
+                            <span
+                                class="status <?= jobStatusClass(
+                                    $job["status"]
+                                ) ?>"
+                            >
+                                <?= htmlspecialchars(
+                                    ucfirst(
+                                        $job["status"]
+                                    )
+                                ) ?>
+                            </span>
+
+                        </td>
 
                         <td>
 
                             <?= date(
                                 "M d, Y",
                                 strtotime(
-                                    $job[
-                                        "created_at"
-                                    ]
+                                    $job["created_at"]
                                 )
                             ) ?>
 
                         </td>
 
-
-
-                        <!-- ACTION -->
-
                         <td>
 
                             <a
                                 href="view-job.php?id=<?= (int)
-                                    $job[
-                                        "id"
-                                    ]
+                                    $job["id"]
                                 ?>"
-                                class="
-                                    btn
-                                    btn-view
-                                "
+                                class="btn"
                             >
                                 View
                             </a>
 
                         </td>
 
-
                     </tr>
-
 
                 <?php endforeach; ?>
 
-
             <?php endif; ?>
 
-
             </tbody>
-
 
         </table>
 
     </div>
 
-
 </div>
 
-
 </body>
-
 </html>

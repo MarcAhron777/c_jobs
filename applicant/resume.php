@@ -1410,84 +1410,14 @@ h1 {
 
 <body>
 
+<?php
+require __DIR__ . "/includes/header.php";
+?>
+
 
 <!-- =========================================================
      NAVBAR
 ========================================================= -->
-
-<nav class="navbar">
-
-
-    <div class="logo">
-
-        JobPortal
-
-    </div>
-
-
-    <div class="nav-links">
-
-
-        <a href="../index.php">
-
-            Home
-
-        </a>
-
-
-        <a href="dashboard.php">
-
-            Dashboard
-
-        </a>
-
-
-        <a href="../jobs/index.php">
-
-            Find Jobs
-
-        </a>
-
-
-        <a href="profile.php">
-
-            Profile
-
-        </a>
-
-
-        <a
-            href="resume.php"
-            class="active"
-        >
-
-            Resume
-
-        </a>
-
-
-        <a href="applications.php">
-
-            Applications
-
-        </a>
-
-
-        <a
-            href="../logout.php"
-            class="logout"
-        >
-
-            Logout
-
-        </a>
-
-
-    </div>
-
-
-</nav>
-
 
 <!-- =========================================================
      MAIN CONTENT

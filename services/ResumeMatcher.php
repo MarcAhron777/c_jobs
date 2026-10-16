@@ -2,999 +2,131 @@
 
 class ResumeMatcher
 {
-    /*
-    |--------------------------------------------------------------------------
-    | MAIN MATCH FUNCTION
-    |--------------------------------------------------------------------------
-    */
-    public static function calculateSkillsMatch(
-        string $requirements,
-        string $resumeText
-    ): array {
+    public static function calculateSkillsMatch(string $requirements, string $resumeText): array
+    {
+        $requiredSkills = self::parseRequiredSkills($requirements);
+        $resumeSkillsText = self::extractSkillsSection($resumeText);
 
-        // Get ONLY the Skills and Competencies section
-        $applicantSkills =
-            self::extractSkillsSection($resumeText);
-
-        // Get employer requirements
-        $jobRequirements =
-            self::parseRequirements($requirements);
-
-
-        if (count($jobRequirements) === 0) {
+        if (!$requiredSkills) {
             return [
-                "score" => 0,
-                "matched_skills" => [],
-                "missing_skills" => [],
-                "resume_skills" => $applicantSkills
+                'score' => 100.0,
+                'matched_skills' => [],
+                'missing_skills' => [],
             ];
         }
 
-
-        if (count($applicantSkills) === 0) {
+        if ($resumeSkillsText === '') {
             return [
-                "score" => 0,
-                "matched_skills" => [],
-                "missing_skills" => $jobRequirements,
-                "resume_skills" => []
+                'score' => 0.0,
+                'matched_skills' => [],
+                'missing_skills' => $requiredSkills,
             ];
         }
 
+        $matched = [];
+        $missing = [];
 
-        $matchedSkills = [];
-        $missingSkills = [];
-
-        $totalScore = 0;
-
-
-        foreach ($jobRequirements as $requirement) {
-
-            $bestScore = 0;
-
-
-            foreach ($applicantSkills as $resumeSkill) {
-
-                $score =
-                    self::calculateSimilarity(
-                        $requirement,
-                        $resumeSkill
-                    );
-
-
-                if ($score > $bestScore) {
-                    $bestScore = $score;
-                }
-            }
-
-
-            $totalScore += $bestScore;
-
-
-            // 60% similarity = matched
-            if ($bestScore >= 60) {
-
-                $matchedSkills[] =
-                    $requirement;
-
+        foreach ($requiredSkills as $skill) {
+            if (self::skillExists($skill, $resumeSkillsText)) {
+                $matched[] = $skill;
             } else {
-
-                $missingSkills[] =
-                    $requirement;
+                $missing[] = $skill;
             }
         }
 
-
-        $finalScore =
-            $totalScore /
-            count($jobRequirements);
-
-
-        if ($finalScore < 0) {
-            $finalScore = 0;
-        }
-
-        if ($finalScore > 100) {
-            $finalScore = 100;
-        }
-
+        $score = (count($matched) / count($requiredSkills)) * 100;
 
         return [
-            "score" => round($finalScore, 2),
-
-            "matched_skills" =>
-                array_values(
-                    array_unique($matchedSkills)
-                ),
-
-            "missing_skills" =>
-                array_values(
-                    array_unique($missingSkills)
-                ),
-
-            "resume_skills" =>
-                $applicantSkills
+            'score' => round($score, 2),
+            'matched_skills' => $matched,
+            'missing_skills' => $missing,
         ];
     }
 
+    public static function extractSkillsSection(string $resumeText): string
+    {
+        $text = str_replace(["\r\n", "\r"], "\n", $resumeText);
 
-    /*
-    |--------------------------------------------------------------------------
-    | EXTRACT ONLY SKILLS AND COMPETENCIES
-    |--------------------------------------------------------------------------
-    */
-    public static function extractSkillsSection(
-        string $resumeText
-    ): array {
+        $patterns = [
+            '/SKILLS\s+AND\s+COMPETENCIES\s*(.*?)(?=\n\s*(?:TRAININGS?|SEMINARS?|CERTIFICATIONS?|WORK EXPERIENCE|EDUCATIONAL BACKGROUND|CHARACTER REFERENCES|DECLARATION)\b|$)/is',
+            '/\bSKILLS\b\s*(.*?)(?=\n\s*(?:TRAININGS?|SEMINARS?|CERTIFICATIONS?|WORK EXPERIENCE|EDUCATIONAL BACKGROUND|CHARACTER REFERENCES|DECLARATION)\b|$)/is',
+        ];
 
-        $resumeText =
-            str_replace(
-                ["\r\n", "\r"],
-                "\n",
-                $resumeText
-            );
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | FIND SKILLS SECTION
-        |--------------------------------------------------------------------------
-        */
-
-        $pattern =
-            '/SKILLS\s+AND\s+COMPETENCIES(.*?)(?=' .
-            'TRAININGS|' .
-            'SEMINARS|' .
-            'CERTIFICATIONS|' .
-            'CHARACTER\s+REFERENCES|' .
-            'REFERENCES|' .
-            'DECLARATION|' .
-            'WORK\s+EXPERIENCE|' .
-            'EDUCATIONAL\s+BACKGROUND|' .
-            '$)/is';
-
-
-        if (
-            !preg_match(
-                $pattern,
-                $resumeText,
-                $matches
-            )
-        ) {
-
-            return [];
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $text, $match)) {
+                return trim((string)($match[1] ?? ''));
+            }
         }
 
+        return '';
+    }
 
-        $skillsText =
-            trim($matches[1]);
-
-
-        if ($skillsText === "") {
-            return [];
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | NORMALIZE SPACES
-        |--------------------------------------------------------------------------
-        */
-
-        $skillsText =
-            preg_replace(
-                '/[ \t]+/',
-                ' ',
-                $skillsText
-            );
-
-
+    private static function parseRequiredSkills(string $requirements): array
+    {
+        $requirements = str_replace(["\r\n", "\r", '•', '·', '|'], ["\n", "\n", "\n", "\n", "\n"], $requirements);
+        $parts = preg_split('/[,;\n]+/', $requirements) ?: [];
         $skills = [];
 
-
-        /*
-        |--------------------------------------------------------------------------
-        | TRY NUMBERED ITEMS
-        |--------------------------------------------------------------------------
-        |
-        | Supports:
-        |
-        | 1. Customer Service
-        | 2. Communication
-        |
-        | OR
-        |
-        | 1.
-        | Customer Service
-        |
-        */
-
-        preg_match_all(
-            '/(?:^|\s)(\d{1,2})\s*[\.\)]\s*(.*?)(?=(?:\s+\d{1,2}\s*[\.\)])|$)/s',
-            $skillsText,
-            $numberedMatches
-        );
-
-
-        if (
-            !empty(
-                $numberedMatches[2]
-            )
-        ) {
-
-            foreach (
-                $numberedMatches[2]
-                as
-                $skill
-            ) {
-
-                $skill =
-                    preg_replace(
-                        '/\s+/',
-                        ' ',
-                        $skill
-                    );
-
-                $skill =
-                    trim($skill);
-
-
-                if ($skill === "") {
-                    continue;
+        foreach ($parts as $part) {
+            $part = trim(preg_replace('/^[-*\d\.\)\s]+/', '', $part));
+            if ($part === '') continue;
+            if (strlen($part) > 120) {
+                $sub = preg_split('/\band\b/i', $part) ?: [$part];
+                foreach ($sub as $s) {
+                    $s = trim($s);
+                    if ($s !== '') $skills[] = $s;
                 }
-
-
-                if (
-                    mb_strlen($skill) > 120
-                ) {
-                    continue;
-                }
-
-
-                $skills[] =
-                    $skill;
+            } else {
+                $skills[] = $part;
             }
         }
 
-
-        /*
-        |--------------------------------------------------------------------------
-        | FALLBACK: LINE BY LINE
-        |--------------------------------------------------------------------------
-        */
-
-        if (count($skills) === 0) {
-
-            $lines =
-                preg_split(
-                    '/\R+/',
-                    $skillsText
-                );
-
-
-            foreach ($lines as $line) {
-
-                $line =
-                    trim($line);
-
-
-                if ($line === "") {
-                    continue;
-                }
-
-
-                // Remove 1. / 2. / - / bullet
-                $line =
-                    preg_replace(
-                        '/^\s*(?:\d+\s*[\.\)]|[-*•–—])\s*/u',
-                        '',
-                        $line
-                    );
-
-
-                $line =
-                    preg_replace(
-                        '/\s+/',
-                        ' ',
-                        $line
-                    );
-
-
-                $line =
-                    trim($line);
-
-
-                if ($line === "") {
-                    continue;
-                }
-
-
-                // Ignore standalone number
-                if (
-                    preg_match(
-                        '/^\d+$/',
-                        $line
-                    )
-                ) {
-                    continue;
-                }
-
-
-                if (
-                    mb_strlen($line) > 120
-                ) {
-                    continue;
-                }
-
-
-                $skills[] =
-                    $line;
-            }
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | REMOVE DUPLICATES
-        |--------------------------------------------------------------------------
-        */
-
-        $unique = [];
-
-
-        foreach ($skills as $skill) {
-
-            $key =
-                strtolower(
-                    trim($skill)
-                );
-
-
-            if ($key === "") {
-                continue;
-            }
-
-
-            if (
-                !isset(
-                    $unique[$key]
-                )
-            ) {
-
-                $unique[$key] =
-                    $skill;
-            }
-        }
-
-
-        return array_values(
-            $unique
-        );
+        return array_values(array_unique($skills));
     }
 
-
-    /*
-    |--------------------------------------------------------------------------
-    | PARSE EMPLOYER REQUIREMENTS
-    |--------------------------------------------------------------------------
-    */
-    private static function parseRequirements(
-        string $requirements
-    ): array {
-
-        $requirements =
-            str_replace(
-                [
-                    "\r\n",
-                    "\r",
-                    "\n",
-                    "•",
-                    "–",
-                    "—",
-                    ";",
-                    "|"
-                ],
-                ",",
-                $requirements
-            );
-
-
-        $parts =
-            explode(
-                ",",
-                $requirements
-            );
-
-
-        $cleanRequirements = [];
-
-
-        foreach ($parts as $requirement) {
-
-            $requirement =
-                trim($requirement);
-
-
-            $requirement =
-                preg_replace(
-                    '/^(?:requirements?|skills?|required skills?|qualifications?)\s*:\s*/i',
-                    '',
-                    $requirement
-                );
-
-
-            $requirement =
-                preg_replace(
-                    '/^\s*(?:\d+\s*[\.\)]|[-*•–—])\s*/u',
-                    '',
-                    $requirement
-                );
-
-
-            $requirement =
-                preg_replace(
-                    '/\s+/',
-                    ' ',
-                    $requirement
-                );
-
-
-            $requirement =
-                trim($requirement);
-
-
-            if ($requirement === "") {
-                continue;
-            }
-
-
-            $cleanRequirements[] =
-                $requirement;
-        }
-
-
-        return array_values(
-            array_unique(
-                $cleanRequirements
-            )
-        );
-    }
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | CALCULATE SIMILARITY
-    |--------------------------------------------------------------------------
-    */
-    private static function calculateSimilarity(
-        string $jobSkill,
-        string $resumeSkill
-    ): float {
-
-        $job =
-            self::normalizeSkill(
-                $jobSkill
-            );
-
-        $resume =
-            self::normalizeSkill(
-                $resumeSkill
-            );
-
-
-        if (
-            $job === "" ||
-            $resume === ""
-        ) {
-
-            return 0;
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | EXACT MATCH
-        |--------------------------------------------------------------------------
-        */
-
-        if ($job === $resume) {
-            return 100;
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | CANONICAL MATCH
-        |--------------------------------------------------------------------------
-        */
-
-        $jobCanonical =
-            self::canonicalSkill($job);
-
-        $resumeCanonical =
-            self::canonicalSkill($resume);
-
-
-        if (
-            $jobCanonical !== "" &&
-            $jobCanonical === $resumeCanonical
-        ) {
-
-            return 100;
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | PARTIAL CONTAINMENT
-        |--------------------------------------------------------------------------
-        */
-
-        if (
-            str_contains(
-                $resume,
-                $job
-            ) ||
-            str_contains(
-                $job,
-                $resume
-            )
-        ) {
-
-            return 95;
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | STRING SIMILARITY
-        |--------------------------------------------------------------------------
-        */
-
-        similar_text(
-            $jobCanonical,
-            $resumeCanonical,
-            $percent
-        );
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | WORD OVERLAP
-        |--------------------------------------------------------------------------
-        */
-
-        $jobWords =
-            self::importantWords(
-                $jobCanonical
-            );
-
-        $resumeWords =
-            self::importantWords(
-                $resumeCanonical
-            );
-
-
-        if (
-            count($jobWords) === 0 ||
-            count($resumeWords) === 0
-        ) {
-
-            return 0;
-        }
-
-
-        $common =
-            array_intersect(
-                $jobWords,
-                $resumeWords
-            );
-
-
-        $commonCount =
-            count(
-                array_unique(
-                    $common
-                )
-            );
-
-
-        if ($commonCount === 0) {
-            return 0;
-        }
-
-
-        $coverage =
-            $commonCount /
-            max(
-                count($jobWords),
-                1
-            );
-
-
-        $tokenScore =
-            $coverage * 100;
-
-
-        $final =
-            max(
-                $percent,
-                $tokenScore
-            );
-
-
-        if ($final > 100) {
-            $final = 100;
-        }
-
-
-        return round(
-            $final,
-            2
-        );
-    }
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | CANONICAL SKILL NAMES
-    |--------------------------------------------------------------------------
-    */
-    private static function canonicalSkill(
-        string $skill
-    ): string {
-
-        $skill =
-            self::normalizeSkill(
-                $skill
-            );
-
-
-        /*
-        | Customer Service
-        */
-
-        if (
-            str_contains(
-                $skill,
-                "customer service"
-            )
-            ||
-            str_contains(
-                $skill,
-                "customer support"
-            )
-        ) {
-
-            return "customer service";
-        }
-
-
-        /*
-        | Communication
-        */
-
-        if (
-            str_contains(
-                $skill,
-                "communication"
-            )
-        ) {
-
-            return "communication";
-        }
-
-
-        /*
-        | Sales
-        */
-
-        if (
-            str_contains(
-                $skill,
-                "sales"
-            )
-            ||
-            str_contains(
-                $skill,
-                "selling"
-            )
-            ||
-            str_contains(
-                $skill,
-                "product assistance"
-            )
-        ) {
-
-            return "sales";
-        }
-
-
-        /*
-        | Cash Handling
-        */
-
-        if (
-            str_contains(
-                $skill,
-                "cash handling"
-            )
-            ||
-            str_contains(
-                $skill,
-                "cashier"
-            )
-        ) {
-
-            return "cash handling";
-        }
-
-
-        /*
-        | POS
-        */
-
-        if (
-            preg_match(
-                '/\bpos\b/',
-                $skill
-            )
-            ||
-            str_contains(
-                $skill,
-                "point of sale"
-            )
-        ) {
-
-            return "pos operation";
-        }
-
-
-        /*
-        | Basic Computer Skills
-        */
-
-        if (
-            str_contains(
-                $skill,
-                "computer"
-            )
-            ||
-            str_contains(
-                $skill,
-                "microsoft word"
-            )
-            ||
-            str_contains(
-                $skill,
-                "microsoft excel"
-            )
-            ||
-            str_contains(
-                $skill,
-                "microsoft office"
-            )
-        ) {
-
-            return "computer skills";
-        }
-
-
-        /*
-        | Teamwork
-        */
-
-        if (
-            str_contains(
-                $skill,
-                "teamwork"
-            )
-            ||
-            str_contains(
-                $skill,
-                "team work"
-            )
-            ||
-            str_contains(
-                $skill,
-                "team player"
-            )
-        ) {
-
-            return "teamwork";
-        }
-
-
-        /*
-        | Time Management
-        */
-
-        if (
-            str_contains(
-                $skill,
-                "time management"
-            )
-        ) {
-
-            return "time management";
-        }
-
-
-        /*
-        | Inventory
-        */
-
-        if (
-            str_contains(
-                $skill,
-                "inventory"
-            )
-        ) {
-
-            return "inventory management";
-        }
-
-
-        /*
-        | Problem Solving
-        */
-
-        if (
-            str_contains(
-                $skill,
-                "problem solving"
-            )
-            ||
-            str_contains(
-                $skill,
-                "problem-solving"
-            )
-        ) {
-
-            return "problem solving";
-        }
-
-
-        return $skill;
-    }
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | NORMALIZE
-    |--------------------------------------------------------------------------
-    */
-    private static function normalizeSkill(
-        string $text
-    ): string {
-
-        $text =
-            mb_strtolower(
-                $text
-            );
-
-
-        $text =
-            str_replace(
-                [
-                    "point-of-sale",
-                    "point of sale",
-                    "(pos)"
-                ],
-                [
-                    "pos",
-                    "pos",
-                    "pos"
-                ],
-                $text
-            );
-
-
-        $text =
-            preg_replace(
-                '/[^a-z0-9+#\.\s]/u',
-                ' ',
-                $text
-            );
-
-
-        $text =
-            preg_replace(
-                '/\s+/',
-                ' ',
-                $text
-            );
-
-
-        return trim($text);
-    }
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | IMPORTANT WORDS
-    |--------------------------------------------------------------------------
-    */
-    private static function importantWords(
-        string $text
-    ): array {
-
-        $text =
-            self::normalizeSkill(
-                $text
-            );
-
-
-        $words =
-            preg_split(
-                '/\s+/',
-                $text
-            );
-
-
-        $stopWords = [
-
-            "and",
-            "or",
-            "the",
-            "a",
-            "an",
-            "of",
-            "to",
-            "in",
-            "for",
-            "with",
-
-            "good",
-            "basic",
-            "strong",
-            "excellent",
-
-            "skill",
-            "skills",
-
-            "experience",
-            "experienced",
-
-            "knowledge",
-            "ability"
-
+    private static function skillExists(string $requiredSkill, string $resumeSkillsText): bool
+    {
+        $required = self::canonical($requiredSkill);
+        $resume = self::canonical($resumeSkillsText);
+
+        if ($required === '' || $resume === '') return false;
+        if (str_contains($resume, $required)) return true;
+
+        $aliases = [
+            'communication skills' => ['communication', 'verbal communication', 'written communication', 'verbal and written communication'],
+            'customer service' => ['customer service', 'customer support', 'client service'],
+            'sales' => ['sales', 'selling', 'product assistance'],
+            'pos operation' => ['pos operation', 'point of sale', 'point of sale operation'],
+            'basic computer skills' => ['computer skills', 'microsoft word', 'microsoft excel', 'microsoft office'],
+            'cash handling' => ['cash handling', 'cashier'],
+            'teamwork' => ['teamwork', 'team player', 'collaboration'],
+            'time management' => ['time management'],
         ];
 
-
-        $result = [];
-
-
-        foreach ($words as $word) {
-
-            $word =
-                trim($word);
-
-
-            if ($word === "") {
-                continue;
+        foreach ($aliases as $canonical => $variants) {
+            $reqHit = ($required === $canonical) || in_array($required, $variants, true);
+            if (!$reqHit) continue;
+            foreach ($variants as $variant) {
+                if (str_contains($resume, self::canonical($variant))) return true;
             }
-
-
-            if (
-                in_array(
-                    $word,
-                    $stopWords,
-                    true
-                )
-            ) {
-                continue;
-            }
-
-
-            $result[] =
-                $word;
         }
 
+        $reqWords = array_values(array_filter(explode(' ', $required), fn($w) => strlen($w) > 2));
+        if (!$reqWords) return false;
 
-        return array_values(
-            array_unique(
-                $result
-            )
-        );
+        $hits = 0;
+        foreach ($reqWords as $word) {
+            if (preg_match('/\b' . preg_quote($word, '/') . '\b/', $resume)) $hits++;
+        }
+
+        return ($hits / count($reqWords)) >= 0.75;
+    }
+
+    private static function canonical(string $value): string
+    {
+        $value = strtolower($value);
+        $value = str_replace(['&', '/', '-', '(', ')'], [' and ', ' ', ' ', ' ', ' '], $value);
+        $value = preg_replace('/[^a-z0-9]+/', ' ', $value);
+        return trim(preg_replace('/\s+/', ' ', $value));
     }
 }

@@ -4,74 +4,77 @@ session_start();
 
 require_once "../config/database.php";
 
-// Admin access only
-if (!isset($_SESSION["user_id"]) || $_SESSION["role"] !== "admin") {
+if (
+    !isset($_SESSION["user_id"]) ||
+    ($_SESSION["role"] ?? "") !== "admin"
+) {
     header("Location: ../login.php");
     exit;
 }
 
-// Total users
-$stmt = $pdo->query("
-    SELECT COUNT(*) 
+$totalUsers = (int) $pdo->query("
+    SELECT COUNT(*)
     FROM users
     WHERE role != 'admin'
-");
+")->fetchColumn();
 
-$totalUsers = $stmt->fetchColumn();
-
-// Total employers
-$stmt = $pdo->query("
+$totalEmployers = (int) $pdo->query("
     SELECT COUNT(*)
     FROM employers e
     INNER JOIN users u ON e.user_id = u.id
     WHERE u.is_active = 1
-");
+")->fetchColumn();
 
-$totalEmployers = $stmt->fetchColumn();
+$totalPrivateEmployers = (int) $pdo->query("
+    SELECT COUNT(*)
+    FROM employers e
+    INNER JOIN users u ON e.user_id = u.id
+    WHERE u.is_active = 1
+    AND e.employer_type = 'private'
+")->fetchColumn();
 
-// Total applicants
-$stmt = $pdo->query("
+$totalLguEmployers = (int) $pdo->query("
+    SELECT COUNT(*)
+    FROM employers e
+    INNER JOIN users u ON e.user_id = u.id
+    WHERE u.is_active = 1
+    AND e.employer_type = 'lgu'
+")->fetchColumn();
+
+$totalApplicants = (int) $pdo->query("
     SELECT COUNT(*)
     FROM applicants a
     INNER JOIN users u ON a.user_id = u.id
     WHERE u.is_active = 1
-");
+")->fetchColumn();
 
-$totalApplicants = $stmt->fetchColumn();
-
-// Total jobs
-$stmt = $pdo->query("
+$totalJobs = (int) $pdo->query("
     SELECT COUNT(*)
     FROM jobs
-");
+")->fetchColumn();
 
-$totalJobs = $stmt->fetchColumn();
-
-// Pending jobs
-$stmt = $pdo->query("
+$pendingJobs = (int) $pdo->query("
     SELECT COUNT(*)
     FROM jobs
     WHERE status = 'pending'
-");
+")->fetchColumn();
 
-$pendingJobs = $stmt->fetchColumn();
-
-// Approved jobs
-$stmt = $pdo->query("
+$approvedJobs = (int) $pdo->query("
     SELECT COUNT(*)
     FROM jobs
     WHERE status = 'approved'
-");
+")->fetchColumn();
 
-$approvedJobs = $stmt->fetchColumn();
-
-// Total applications
-$stmt = $pdo->query("
+$totalApplications = (int) $pdo->query("
     SELECT COUNT(*)
     FROM applications
-");
+")->fetchColumn();
 
-$totalApplications = $stmt->fetchColumn();
+$pendingEmployerVerifications = (int) $pdo->query("
+    SELECT COUNT(*)
+    FROM employers
+    WHERE verification_status = 'pending'
+")->fetchColumn();
 
 ?>
 
@@ -80,208 +83,133 @@ $totalApplications = $stmt->fetchColumn();
 
 <head>
 
-    <meta charset="UTF-8">
+<meta charset="UTF-8">
 
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+>
 
-    <title>Admin Dashboard - Caloocan Job Portal</title>
+<title>
+    Admin Dashboard - Caloocan Job Portal
+</title>
 
-    <style>
+<style>
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
 
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
+body {
+    font-family: Arial, Helvetica, sans-serif;
+    background: #f5f7fb;
+    color: #222;
+}
 
-        body {
-            font-family: Arial, Helvetica, sans-serif;
-            background: #f5f7fb;
-            color: #222;
-        }
+.container {
+    max-width: 1250px;
+    margin: 40px auto;
+    padding: 0 20px 50px;
+}
 
-        .navbar {
-            background: #111827;
-            color: white;
-            padding: 18px 50px;
-        }
+.welcome {
+    margin-bottom: 30px;
+}
 
-        .navbar-container {
-            max-width: 1200px;
-            margin: auto;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
+.welcome h1 {
+    margin-bottom: 8px;
+}
 
-        .logo {
-            color: white;
-            text-decoration: none;
-            font-size: 22px;
-            font-weight: bold;
-        }
+.welcome p {
+    color: #64748b;
+}
 
-        .nav-links {
-            display: flex;
-            gap: 20px;
-            align-items: center;
-        }
+.stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+    margin-bottom: 30px;
+}
 
-        .nav-links a {
-            color: white;
-            text-decoration: none;
-            font-size: 14px;
-        }
+.stat-card {
+    background: #ffffff;
+    padding: 25px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+}
 
-        .logout {
-            background: #dc2626;
-            padding: 9px 15px;
-            border-radius: 5px;
-        }
+.stat-card h3 {
+    color: #64748b;
+    font-size: 14px;
+    margin-bottom: 10px;
+}
 
-        .container {
-            max-width: 1200px;
-            margin: 40px auto;
-            padding: 0 20px;
-        }
+.stat-card .number {
+    font-size: 30px;
+    font-weight: bold;
+}
 
-        .welcome {
-            margin-bottom: 30px;
-        }
+.stat-card p {
+    margin-top: 8px;
+    color: #94a3b8;
+    font-size: 12px;
+    line-height: 1.5;
+}
 
-        .welcome h1 {
-            margin-bottom: 8px;
-        }
+.quick-actions {
+    background: #ffffff;
+    padding: 25px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+}
 
-        .welcome p {
-            color: #666;
-        }
+.quick-actions h2 {
+    margin-bottom: 20px;
+}
 
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 20px;
-            margin-bottom: 30px;
-        }
+.actions {
+    display: flex;
+    gap: 15px;
+    flex-wrap: wrap;
+}
 
-        .stat-card {
-            background: white;
-            padding: 25px;
-            border-radius: 8px;
-            border: 1px solid #e5e7eb;
-        }
+.action-btn {
+    display: inline-block;
+    padding: 12px 20px;
+    background: #2563eb;
+    color: #ffffff;
+    text-decoration: none;
+    border-radius: 5px;
+}
 
-        .stat-card h3 {
-            color: #666;
-            font-size: 14px;
-            margin-bottom: 10px;
-        }
+.action-btn:hover {
+    background: #1d4ed8;
+}
 
-        .stat-card .number {
-            font-size: 30px;
-            font-weight: bold;
-        }
+@media (max-width: 1000px) {
+    .stats {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
 
-        .quick-actions {
-            background: white;
-            padding: 25px;
-            border-radius: 8px;
-            border: 1px solid #e5e7eb;
-        }
+@media (max-width: 600px) {
+    .stats {
+        grid-template-columns: 1fr;
+    }
 
-        .quick-actions h2 {
-            margin-bottom: 20px;
-        }
-
-        .actions {
-            display: flex;
-            gap: 15px;
-            flex-wrap: wrap;
-        }
-
-        .action-btn {
-            display: inline-block;
-            padding: 12px 20px;
-            background: #2563eb;
-            color: white;
-            text-decoration: none;
-            border-radius: 5px;
-        }
-
-        .action-btn:hover {
-            background: #1d4ed8;
-        }
-
-        @media (max-width: 900px) {
-
-            .stats {
-                grid-template-columns: repeat(2, 1fr);
-            }
-
-        }
-
-        @media (max-width: 600px) {
-
-            .navbar {
-                padding: 15px 20px;
-            }
-
-            .navbar-container {
-                flex-direction: column;
-                gap: 15px;
-            }
-
-            .stats {
-                grid-template-columns: 1fr;
-            }
-
-        }
-
-    </style>
+    .container {
+        margin-top: 25px;
+        padding: 0 15px 40px;
+    }
+}
+</style>
 
 </head>
 
 <body>
 
-
-<nav class="navbar">
-
-    <div class="navbar-container">
-
-        <a href="dashboard.php" class="logo">
-            Job Portal Admin
-        </a>
-
-        <div class="nav-links">
-
-            <a href="dashboard.php">
-                Dashboard
-            </a>
-
-            <a href="jobs.php">
-                Manage Jobs
-            </a>
-
-            <a href="employers.php">
-                Manage Employers
-            </a>
-
-            <a href="applicants.php">
-                Manage Applicants
-            </a>
-
-            <a href="reports.php">Manage Reports</a>
-
-            <a href="../logout.php" class="logout">
-                Logout
-            </a>
-
-        </div>
-
-    </div>
-
-</nav>
-
+<?php require __DIR__ . "/includes/header.php"; ?>
 
 <div class="container">
 
@@ -292,106 +220,90 @@ $totalApplications = $stmt->fetchColumn();
         </h1>
 
         <p>
-            Manage jobs, employers, applicants, and applications.
+            Manage jobs, employers, applicants,
+            applications and reports.
         </p>
 
     </div>
 
-
     <div class="stats">
 
         <div class="stat-card">
-
-            <h3>
-                Total Users
-            </h3>
-
+            <h3>Total Users</h3>
             <div class="number">
-                <?php echo $totalUsers; ?>
+                <?= number_format($totalUsers) ?>
             </div>
-
+            <p>
+                Employers and applicants.
+            </p>
         </div>
 
-
         <div class="stat-card">
-
-            <h3>
-                Employers
-            </h3>
-
+            <h3>Active Employers</h3>
             <div class="number">
-                <?php echo $totalEmployers; ?>
+                <?= number_format($totalEmployers) ?>
             </div>
-
         </div>
 
-
         <div class="stat-card">
-
-            <h3>
-                Applicants
-            </h3>
-
+            <h3>Private Employers</h3>
             <div class="number">
-                <?php echo $totalApplicants; ?>
+                <?= number_format($totalPrivateEmployers) ?>
             </div>
-
         </div>
 
-
         <div class="stat-card">
-
-            <h3>
-                Total Jobs
-            </h3>
-
+            <h3>LGU Employers</h3>
             <div class="number">
-                <?php echo $totalJobs; ?>
+                <?= number_format($totalLguEmployers) ?>
             </div>
-
         </div>
 
-
         <div class="stat-card">
-
-            <h3>
-                Pending Jobs
-            </h3>
-
+            <h3>Applicants</h3>
             <div class="number">
-                <?php echo $pendingJobs; ?>
+                <?= number_format($totalApplicants) ?>
             </div>
-
         </div>
 
-
         <div class="stat-card">
-
-            <h3>
-                Approved Jobs
-            </h3>
-
+            <h3>Total Jobs</h3>
             <div class="number">
-                <?php echo $approvedJobs; ?>
+                <?= number_format($totalJobs) ?>
             </div>
-
         </div>
 
+        <div class="stat-card">
+            <h3>Pending Jobs</h3>
+            <div class="number">
+                <?= number_format($pendingJobs) ?>
+            </div>
+        </div>
 
         <div class="stat-card">
-
-            <h3>
-                Applications
-            </h3>
-
+            <h3>Approved Jobs</h3>
             <div class="number">
-                <?php echo $totalApplications; ?>
+                <?= number_format($approvedJobs) ?>
             </div>
+        </div>
 
+        <div class="stat-card">
+            <h3>Applications</h3>
+            <div class="number">
+                <?= number_format($totalApplications) ?>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <h3>Pending Employer Verification</h3>
+            <div class="number">
+                <?= number_format(
+                    $pendingEmployerVerifications
+                ) ?>
+            </div>
         </div>
 
     </div>
-
 
     <div class="quick-actions">
 
@@ -410,7 +322,11 @@ $totalApplications = $stmt->fetchColumn();
             </a>
 
             <a href="applicants.php" class="action-btn">
-                View Applicants
+                Manage Applicants
+            </a>
+
+            <a href="reports.php" class="action-btn">
+                View Reports
             </a>
 
         </div>
@@ -419,7 +335,5 @@ $totalApplications = $stmt->fetchColumn();
 
 </div>
 
-
 </body>
-
 </html>

@@ -3,7 +3,7 @@
 session_start();
 
 require_once "../config/database.php";
-
+require_once "../services/NotificationService.php";
 
 /*
 |--------------------------------------------------------------------------
@@ -19,12 +19,10 @@ if (
     exit;
 }
 
-
 $userId = (int) $_SESSION["user_id"];
 
 $error = "";
 $success = "";
-
 
 /*
 |--------------------------------------------------------------------------
@@ -36,21 +34,13 @@ $jobId = isset($_GET["job_id"])
     ? (int) $_GET["job_id"]
     : 0;
 
-$search = trim(
-    $_GET["search"]
-    ?? ""
-);
+$search = trim($_GET["search"] ?? "");
 
 $page = isset($_GET["page"])
-    ? (int) $_GET["page"]
+    ? max(1, (int) $_GET["page"])
     : 1;
 
-if ($page < 1) {
-    $page = 1;
-}
-
 $perPage = 10;
-
 
 /*
 |--------------------------------------------------------------------------
@@ -67,13 +57,9 @@ $stmt = $pdo->prepare("
     LIMIT 1
 ");
 
-$stmt->execute([
-    $userId
-]);
+$stmt->execute([$userId]);
 
-$employer = $stmt->fetch(
-    PDO::FETCH_ASSOC
-);
+$employer = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$employer) {
     die("Employer profile not found.");
@@ -81,10 +67,55 @@ if (!$employer) {
 
 $employerId = (int) $employer["id"];
 
+/*
+|--------------------------------------------------------------------------
+| APPLICATION MATCH COLUMN CHECK
+|--------------------------------------------------------------------------
+|
+| Allows this page to remain usable even before the optional matching
+| migration has been run.
+|
+*/
+
+$matchColumns = [];
+
+try {
+    $columnStmt = $pdo->query("SHOW COLUMNS FROM application_matches");
+
+    foreach ($columnStmt->fetchAll(PDO::FETCH_ASSOC) as $column) {
+        $matchColumns[] = $column["Field"];
+    }
+} catch (Throwable $e) {
+    $matchColumns = [];
+}
+
+$tesdaScoreSelect = in_array("tesda_score", $matchColumns, true)
+    ? "am.tesda_score"
+    : "0 AS tesda_score";
+
+$qualificationExplanationSelect =
+    in_array("qualification_explanation", $matchColumns, true)
+        ? "am.qualification_explanation"
+        : "NULL AS qualification_explanation";
+
+$matchedQualificationsSelect =
+    in_array("matched_qualifications", $matchColumns, true)
+        ? "am.matched_qualifications"
+        : "NULL AS matched_qualifications";
+
+$missingQualificationsSelect =
+    in_array("missing_qualifications", $matchColumns, true)
+        ? "am.missing_qualifications"
+        : "NULL AS missing_qualifications";
+
+$skillGapFeedbackSelect =
+    in_array("skill_gap_feedback", $matchColumns, true)
+        ? "am.skill_gap_feedback"
+        : "NULL AS skill_gap_feedback";
 
 /*
 |--------------------------------------------------------------------------
-| UPDATE APPLICATION STATUS
+| UPDATE APPLICATION STATUS + NOTIFICATION
 |--------------------------------------------------------------------------
 */
 
@@ -94,10 +125,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         ? (int) $_POST["application_id"]
         : 0;
 
-    $status = trim(
-        $_POST["status"]
-        ?? ""
-    );
+    $status = trim($_POST["status"] ?? "");
 
     $allowedStatuses = [
         "pending",
@@ -109,53 +137,106 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
     if (
         $applicationId <= 0 ||
-        !in_array(
-            $status,
-            $allowedStatuses,
-            true
-        )
+        !in_array($status, $allowedStatuses, true)
     ) {
-
-        $error =
-            "Invalid application status.";
-
+        $error = "Invalid application status.";
     } else {
 
-        $stmt = $pdo->prepare("
-            UPDATE applications a
+        try {
 
-            INNER JOIN jobs j
-                ON a.job_id = j.id
+            /*
+            |--------------------------------------------------------------------------
+            | GET APPLICATION OWNER BEFORE UPDATE
+            |--------------------------------------------------------------------------
+            */
 
-            SET
-                a.status = ?
+            $stmt = $pdo->prepare("
+                SELECT
+                    a.id,
+                    a.status AS current_status,
+                    ap.user_id AS applicant_user_id,
+                    j.job_title
+                FROM applications a
+                INNER JOIN jobs j
+                    ON a.job_id = j.id
+                INNER JOIN applicants ap
+                    ON a.applicant_id = ap.id
+                WHERE
+                    a.id = ?
+                    AND j.employer_id = ?
+                LIMIT 1
+            ");
 
-            WHERE
-                a.id = ?
-                AND j.employer_id = ?
-        ");
+            $stmt->execute([
+                $applicationId,
+                $employerId
+            ]);
 
-        $stmt->execute([
-            $status,
-            $applicationId,
-            $employerId
-        ]);
+            $applicationOwner = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        if (
-            $stmt->rowCount() > 0
-        ) {
+            if (!$applicationOwner) {
+                throw new Exception(
+                    "Application not found or you do not have permission to update it."
+                );
+            }
 
-            $success =
-                "Application status updated successfully.";
+            $oldStatus = $applicationOwner["current_status"];
 
-        } else {
+            /*
+            |--------------------------------------------------------------------------
+            | UPDATE
+            |--------------------------------------------------------------------------
+            */
 
-            $error =
-                "Application not found or no changes were made.";
+            $stmt = $pdo->prepare("
+                UPDATE applications
+                SET status = ?
+                WHERE id = ?
+            ");
+
+            $stmt->execute([
+                $status,
+                $applicationId
+            ]);
+
+            $success = "Application status updated successfully.";
+
+            /*
+            |--------------------------------------------------------------------------
+            | NOTIFY APPLICANT ONLY WHEN STATUS REALLY CHANGED
+            |--------------------------------------------------------------------------
+            */
+
+            if ($oldStatus !== $status) {
+
+                $statusLabel = ucfirst($status);
+
+                try {
+                    NotificationService::create(
+                        $pdo,
+                        (int) $applicationOwner["applicant_user_id"],
+                        "Application Status Updated",
+                        "Your application for "
+                            . $applicationOwner["job_title"]
+                            . " is now "
+                            . $statusLabel
+                            . ".",
+                        "application_status",
+                        $applicationId
+                    );
+                } catch (Throwable $notificationError) {
+                    error_log(
+                        "Applicant notification error: "
+                        . $notificationError->getMessage()
+                    );
+                }
+            }
+
+        } catch (Throwable $e) {
+            $error = $e->getMessage();
         }
     }
 }
-
 
 /*
 |--------------------------------------------------------------------------
@@ -172,18 +253,13 @@ $stmt = $pdo->prepare("
     ORDER BY created_at DESC
 ");
 
-$stmt->execute([
-    $employerId
-]);
+$stmt->execute([$employerId]);
 
-$jobs = $stmt->fetchAll(
-    PDO::FETCH_ASSOC
-);
-
+$jobs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 /*
 |--------------------------------------------------------------------------
-| BUILD CONDITIONS
+| BUILD FILTER
 |--------------------------------------------------------------------------
 */
 
@@ -195,47 +271,23 @@ $params = [
     $employerId
 ];
 
-
-/*
-|--------------------------------------------------------------------------
-| JOB FILTER
-|--------------------------------------------------------------------------
-*/
-
 if ($jobId > 0) {
-
-    $conditions[] =
-        "j.id = ?";
-
-    $params[] =
-        $jobId;
+    $conditions[] = "j.id = ?";
+    $params[] = $jobId;
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| SEARCH
-|--------------------------------------------------------------------------
-*/
 
 if ($search !== "") {
 
     $conditions[] = "
         (
-            CONCAT(
-                ap.first_name,
-                ' ',
-                ap.last_name
-            ) LIKE ?
-
+            CONCAT(ap.first_name, ' ', ap.last_name) LIKE ?
             OR ap.first_name LIKE ?
             OR ap.last_name LIKE ?
             OR j.job_title LIKE ?
         )
     ";
 
-    $searchValue =
-        "%" . $search . "%";
+    $searchValue = "%" . $search . "%";
 
     $params[] = $searchValue;
     $params[] = $searchValue;
@@ -243,76 +295,39 @@ if ($search !== "") {
     $params[] = $searchValue;
 }
 
-
-$whereSql =
-    implode(
-        " AND ",
-        $conditions
-    );
-
+$whereSql = implode(" AND ", $conditions);
 
 /*
 |--------------------------------------------------------------------------
-| COUNT APPLICANTS
+| COUNT
 |--------------------------------------------------------------------------
 */
 
 $countSql = "
     SELECT COUNT(*)
-
     FROM applications a
-
     INNER JOIN jobs j
         ON a.job_id = j.id
-
     INNER JOIN applicants ap
         ON a.applicant_id = ap.id
-
     WHERE $whereSql
 ";
 
+$stmt = $pdo->prepare($countSql);
+$stmt->execute($params);
 
-$stmt =
-    $pdo->prepare(
-        $countSql
-    );
-
-$stmt->execute(
-    $params
-);
-
-$totalApplicants =
-    (int) $stmt->fetchColumn();
-
-
-/*
-|--------------------------------------------------------------------------
-| PAGINATION
-|--------------------------------------------------------------------------
-*/
+$totalApplicants = (int) $stmt->fetchColumn();
 
 $totalPages = max(
     1,
-    (int) ceil(
-        $totalApplicants /
-        $perPage
-    )
+    (int) ceil($totalApplicants / $perPage)
 );
 
-
-if (
-    $page > $totalPages
-) {
-
-    $page =
-        $totalPages;
+if ($page > $totalPages) {
+    $page = $totalPages;
 }
 
-
-$offset =
-    ($page - 1)
-    * $perPage;
-
+$offset = ($page - 1) * $perPage;
 
 /*
 |--------------------------------------------------------------------------
@@ -322,7 +337,6 @@ $offset =
 
 $sql = "
     SELECT
-
         a.id AS application_id,
         a.status,
         a.cover_letter,
@@ -346,8 +360,13 @@ $sql = "
         am.skills_score,
         am.experience_score,
         am.education_score,
+        $tesdaScoreSelect,
         am.matched_skills,
-        am.missing_skills
+        am.missing_skills,
+        $qualificationExplanationSelect,
+        $matchedQualificationsSelect,
+        $missingQualificationsSelect,
+        $skillGapFeedbackSelect
 
     FROM applications a
 
@@ -366,67 +385,34 @@ $sql = "
     WHERE $whereSql
 
     ORDER BY
-
-        COALESCE(
-            am.match_score,
-            0
-        ) DESC,
-
+        COALESCE(am.match_score, 0) DESC,
         a.applied_at DESC
 
     LIMIT $perPage
     OFFSET $offset
 ";
 
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
 
-$stmt =
-    $pdo->prepare(
-        $sql
-    );
-
-$stmt->execute(
-    $params
-);
-
-$applicants =
-    $stmt->fetchAll(
-        PDO::FETCH_ASSOC
-    );
-
+$applicants = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 /*
 |--------------------------------------------------------------------------
-| PAGINATION URL
+| HELPERS
 |--------------------------------------------------------------------------
 */
 
-function buildPageUrl(
-    $pageNumber
-) {
+function buildPageUrl(int $pageNumber): string
+{
+    $params = $_GET;
+    $params["page"] = $pageNumber;
 
-    $params =
-        $_GET;
-
-    $params["page"] =
-        $pageNumber;
-
-    return "?"
-        . http_build_query(
-            $params
-        );
+    return "?" . http_build_query($params);
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| MATCH LABEL
-|--------------------------------------------------------------------------
-*/
-
-function getMatchLabel(
-    float $score
-): string {
-
+function getMatchLabel(float $score): string
+{
     if ($score >= 80) {
         return "Strong Match";
     }
@@ -442,11 +428,8 @@ function getMatchLabel(
     return "Low Match";
 }
 
-
-function getMatchClass(
-    float $score
-): string {
-
+function getMatchClass(float $score): string
+{
     if ($score >= 80) {
         return "match-strong";
     }
@@ -462,10 +445,20 @@ function getMatchClass(
     return "match-low";
 }
 
+function clampScore($score): float
+{
+    return max(
+        0,
+        min(
+            100,
+            (float) ($score ?? 0)
+        )
+    );
+}
+
 ?>
 
 <!DOCTYPE html>
-
 <html lang="en">
 
 <head>
@@ -481,7 +474,6 @@ function getMatchClass(
     Applicants - Caloocan Job Portal
 </title>
 
-
 <style>
 
 * {
@@ -490,1036 +482,469 @@ function getMatchClass(
     padding: 0;
 }
 
-
 body {
-    font-family:
-        Arial,
-        Helvetica,
-        sans-serif;
-
-    background:
-        #f5f7fb;
-
-    color:
-        #333;
+    font-family: Arial, Helvetica, sans-serif;
+    background: #f5f7fb;
+    color: #333;
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| NAVBAR
-|--------------------------------------------------------------------------
-*/
-
-.navbar {
-    background:
-        white;
-
-    border-bottom:
-        1px solid #ddd;
-
-    padding:
-        16px 40px;
-
-    display:
-        flex;
-
-    justify-content:
-        space-between;
-
-    align-items:
-        center;
-}
-
-
-.logo {
-    font-size:
-        24px;
-
-    font-weight:
-        bold;
-
-    color:
-        #2563eb;
-}
-
-
-.nav-links {
-    display:
-        flex;
-
-    gap:
-        20px;
-
-    align-items:
-        center;
-}
-
-
-.nav-links a {
-    text-decoration:
-        none;
-
-    color:
-        #333;
-}
-
-
-.nav-links a:hover {
-    color:
-        #2563eb;
-}
-
-
-.nav-links .active {
-    color:
-        #2563eb;
-
-    font-weight:
-        bold;
-}
-
-
-.logout {
-    color:
-        #dc2626 !important;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| CONTAINER
-|--------------------------------------------------------------------------
-*/
 
 .container {
-    max-width:
-        1200px;
-
-    margin:
-        40px auto;
-
-    padding:
-        0 20px 50px;
+    max-width: 1200px;
+    margin: 40px auto;
+    padding: 0 20px 50px;
 }
-
 
 .header {
-    margin-bottom:
-        25px;
+    margin-bottom: 25px;
 }
-
 
 .header h1 {
-    margin-bottom:
-        8px;
+    margin-bottom: 8px;
 }
-
 
 .header p {
-    color:
-        #666;
+    color: #666;
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| MESSAGES
-|--------------------------------------------------------------------------
-*/
 
 .message {
-    padding:
-        12px 15px;
-
-    border-radius:
-        6px;
-
-    margin-bottom:
-        20px;
+    padding: 12px 15px;
+    border-radius: 6px;
+    margin-bottom: 20px;
 }
-
 
 .success {
-    background:
-        #dcfce7;
-
-    color:
-        #166534;
+    background: #dcfce7;
+    color: #166534;
 }
-
 
 .error {
-    background:
-        #fee2e2;
-
-    color:
-        #991b1b;
+    background: #fee2e2;
+    color: #991b1b;
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| FILTERS
-|--------------------------------------------------------------------------
-*/
 
 .filters {
-    background:
-        white;
-
-    padding:
-        20px;
-
-    border-radius:
-        10px;
-
-    margin-bottom:
-        20px;
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    margin-bottom: 20px;
 
     box-shadow:
         0 2px 10px
-        rgba(
-            0,
-            0,
-            0,
-            0.05
-        );
+        rgba(0,0,0,0.05);
 }
-
 
 .filters form {
-    display:
-        grid;
-
-    grid-template-columns:
-        1fr 220px auto;
-
-    gap:
-        10px;
+    display: grid;
+    grid-template-columns: 1fr 220px auto;
+    gap: 10px;
 }
-
 
 .input,
-select {
-    width:
-        100%;
-
-    padding:
-        11px 12px;
-
-    border:
-        1px solid #ccc;
-
-    border-radius:
-        6px;
-
-    font-size:
-        14px;
-
-    background:
-        white;
+.filters select {
+    width: 100%;
+    padding: 11px 12px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    font-size: 14px;
+    background: white;
 }
-
 
 .filter-btn {
-    padding:
-        11px 18px;
-
-    background:
-        #2563eb;
-
-    border:
-        none;
-
-    color:
-        white;
-
-    border-radius:
-        6px;
-
-    cursor:
-        pointer;
-
-    font-weight:
-        bold;
+    padding: 11px 18px;
+    background: #2563eb;
+    border: none;
+    color: white;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: bold;
 }
-
-
-.filter-btn:hover {
-    background:
-        #1d4ed8;
-}
-
 
 .clear-btn {
-    display:
-        inline-block;
-
-    margin-top:
-        10px;
-
-    padding:
-        9px 15px;
-
-    background:
-        #e5e7eb;
-
-    color:
-        #333;
-
-    border-radius:
-        6px;
-
-    text-decoration:
-        none;
-
-    font-size:
-        13px;
+    display: inline-block;
+    margin-top: 10px;
+    padding: 9px 15px;
+    background: #e5e7eb;
+    color: #333;
+    border-radius: 6px;
+    text-decoration: none;
+    font-size: 13px;
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| RESULT SUMMARY
-|--------------------------------------------------------------------------
-*/
 
 .result-summary {
-    display:
-        flex;
-
-    justify-content:
-        space-between;
-
-    align-items:
-        center;
-
-    margin-bottom:
-        15px;
-
-    color:
-        #666;
-
-    font-size:
-        14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    color: #666;
+    font-size: 14px;
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| GRID
-|--------------------------------------------------------------------------
-*/
 
 .applicant-grid {
-    display:
-        grid;
-
+    display: grid;
     grid-template-columns:
-        repeat(
-            2,
-            minmax(
-                0,
-                1fr
-            )
-        );
-
-    gap:
-        20px;
+        repeat(2, minmax(0, 1fr));
+    gap: 20px;
 }
-
 
 .applicant-card {
-    background:
-        white;
-
-    border-radius:
-        12px;
-
-    padding:
-        20px;
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
 
     box-shadow:
         0 2px 10px
-        rgba(
-            0,
-            0,
-            0,
-            0.05
-        );
+        rgba(0,0,0,0.05);
 
-    border:
-        1px solid #eee;
+    border: 1px solid #eee;
 
-    display:
-        flex;
-
-    flex-direction:
-        column;
+    display: flex;
+    flex-direction: column;
 }
-
-
-.applicant-card:hover {
-    box-shadow:
-        0 5px 18px
-        rgba(
-            0,
-            0,
-            0,
-            0.08
-        );
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| CARD HEADER
-|--------------------------------------------------------------------------
-*/
 
 .card-header {
-    display:
-        flex;
-
-    justify-content:
-        space-between;
-
-    align-items:
-        flex-start;
-
-    gap:
-        15px;
-
-    margin-bottom:
-        15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 15px;
+    margin-bottom: 15px;
 }
-
 
 .applicant-name {
-    font-size:
-        19px;
-
-    font-weight:
-        bold;
-
-    color:
-        #111827;
+    font-size: 19px;
+    font-weight: bold;
+    color: #111827;
 }
-
 
 .job-title {
-    margin-top:
-        5px;
-
-    color:
-        #555;
-
-    font-size:
-        14px;
+    margin-top: 5px;
+    color: #555;
+    font-size: 14px;
 }
-
 
 .applied-date {
-    margin-top:
-        7px;
-
-    color:
-        #888;
-
-    font-size:
-        12px;
+    margin-top: 7px;
+    color: #888;
+    font-size: 12px;
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| STATUS
-|--------------------------------------------------------------------------
-*/
 
 .status {
-    display:
-        inline-block;
-
-    padding:
-        6px 10px;
-
-    border-radius:
-        20px;
-
-    font-size:
-        11px;
-
-    font-weight:
-        bold;
-
-    white-space:
-        nowrap;
+    display: inline-block;
+    padding: 6px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: bold;
+    white-space: nowrap;
 }
-
 
 .status-pending {
-    background:
-        #fef3c7;
-
-    color:
-        #92400e;
+    background: #fef3c7;
+    color: #92400e;
 }
-
 
 .status-reviewed {
-    background:
-        #dbeafe;
-
-    color:
-        #1e40af;
+    background: #dbeafe;
+    color: #1e40af;
 }
-
 
 .status-shortlisted {
-    background:
-        #dcfce7;
-
-    color:
-        #166534;
+    background: #dcfce7;
+    color: #166534;
 }
-
 
 .status-rejected {
-    background:
-        #fee2e2;
-
-    color:
-        #991b1b;
+    background: #fee2e2;
+    color: #991b1b;
 }
-
 
 .status-hired {
-    background:
-        #d1fae5;
-
-    color:
-        #065f46;
+    background: #d1fae5;
+    color: #065f46;
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| APPLICANT INFO
-|--------------------------------------------------------------------------
-*/
 
 .info-list {
-    margin-bottom:
-        15px;
+    margin-bottom: 15px;
 }
-
 
 .info-item {
-    font-size:
-        13px;
-
-    color:
-        #666;
-
-    margin-bottom:
-        5px;
+    font-size: 13px;
+    color: #666;
+    margin-bottom: 5px;
 }
-
 
 .info-item strong {
-    color:
-        #333;
+    color: #333;
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| MATCH
-|--------------------------------------------------------------------------
-*/
 
 .match-box {
-    background:
-        #eff6ff;
-
-    border:
-        1px solid #bfdbfe;
-
-    border-radius:
-        8px;
-
-    padding:
-        14px;
-
-    margin-bottom:
-        15px;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 8px;
+    padding: 14px;
+    margin-bottom: 15px;
 }
-
 
 .match-top {
-    display:
-        flex;
-
-    justify-content:
-        space-between;
-
-    align-items:
-        center;
-
-    gap:
-        10px;
-
-    margin-bottom:
-        8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
 }
-
 
 .match-left {
-    display:
-        flex;
-
-    flex-direction:
-        column;
-
-    gap:
-        4px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
-
 
 .match-label {
-    font-size:
-        13px;
-
-    font-weight:
-        bold;
-
-    color:
-        #1e3a8a;
+    font-size: 13px;
+    font-weight: bold;
+    color: #1e3a8a;
 }
-
 
 .match-category {
-    font-size:
-        11px;
-
-    font-weight:
-        bold;
+    font-size: 11px;
+    font-weight: bold;
 }
-
 
 .match-strong {
-    color:
-        #15803d;
+    color: #15803d;
 }
-
 
 .match-good {
-    color:
-        #2563eb;
+    color: #2563eb;
 }
-
 
 .match-fair {
-    color:
-        #b45309;
+    color: #b45309;
 }
-
 
 .match-low {
-    color:
-        #dc2626;
+    color: #dc2626;
 }
-
 
 .match-score {
-    font-size:
-        22px;
-
-    font-weight:
-        bold;
-
-    color:
-        #2563eb;
+    font-size: 22px;
+    font-weight: bold;
+    color: #2563eb;
 }
-
 
 .progress {
-    height:
-        8px;
-
-    width:
-        100%;
-
-    background:
-        #dbeafe;
-
-    border-radius:
-        20px;
-
-    overflow:
-        hidden;
+    height: 8px;
+    width: 100%;
+    background: #dbeafe;
+    border-radius: 20px;
+    overflow: hidden;
 }
-
 
 .progress-bar {
-    height:
-        100%;
-
-    background:
-        #2563eb;
-
-    border-radius:
-        20px;
+    height: 100%;
+    background: #2563eb;
+    border-radius: 20px;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| SKILLS
-|--------------------------------------------------------------------------
-*/
-
-.skills {
-    font-size:
-        12px;
-
-    color:
-        #666;
-
-    margin-top:
-        10px;
-
-    line-height:
-        1.6;
+.score-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 7px;
+    margin-top: 12px;
 }
 
-
-.skills strong {
-    color:
-        #333;
+.score-card {
+    background: white;
+    border: 1px solid #dbeafe;
+    border-radius: 6px;
+    padding: 9px;
+    text-align: center;
 }
 
+.score-card span {
+    display: block;
+    color: #64748b;
+    font-size: 10px;
+    margin-bottom: 3px;
+}
 
-/*
-|--------------------------------------------------------------------------
-| FOOTER
-|--------------------------------------------------------------------------
-*/
+.score-card strong {
+    color: #1d4ed8;
+    font-size: 14px;
+}
+
+.detail-block {
+    margin-top: 10px;
+    font-size: 12px;
+    color: #555;
+    line-height: 1.6;
+}
+
+.detail-block strong {
+    color: #222;
+}
+
+.explanation-box {
+    margin-top: 12px;
+    padding: 10px;
+    border-radius: 6px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #475569;
+}
+
+.gap-box {
+    margin-top: 10px;
+    padding: 10px;
+    border-radius: 6px;
+    background: #fff7ed;
+    border: 1px solid #fed7aa;
+    color: #9a3412;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.status-form {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid #eee;
+}
+
+.status-form-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+}
+
+.status-form select {
+    width: 100%;
+    padding: 9px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+}
+
+.status-btn {
+    border: none;
+    background: #0f766e;
+    color: white;
+    padding: 9px 13px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: bold;
+}
 
 .card-footer {
-    margin-top:
-        auto;
+    margin-top: auto;
+    padding-top: 15px;
+    border-top: 1px solid #eee;
 
-    padding-top:
-        15px;
-
-    border-top:
-        1px solid #eee;
-
-    display:
-        flex;
-
-    justify-content:
-        space-between;
-
-    align-items:
-        center;
-
-    gap:
-        10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
 }
-
 
 .resume-link {
-    color:
-        #64748b;
-
-    text-decoration:
-        none;
-
-    font-size:
-        13px;
+    color: #64748b;
+    text-decoration: none;
+    font-size: 13px;
 }
-
-
-.resume-link:hover {
-    text-decoration:
-        underline;
-}
-
 
 .view-btn {
-    display:
-        inline-block;
-
-    padding:
-        9px 15px;
-
-    background:
-        #2563eb;
-
-    color:
-        white;
-
-    text-decoration:
-        none;
-
-    border-radius:
-        6px;
-
-    font-size:
-        13px;
-
-    font-weight:
-        bold;
+    display: inline-block;
+    padding: 9px 15px;
+    background: #2563eb;
+    color: white;
+    text-decoration: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: bold;
 }
-
-
-.view-btn:hover {
-    background:
-        #1d4ed8;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| EMPTY
-|--------------------------------------------------------------------------
-*/
 
 .empty {
-    background:
-        white;
-
-    padding:
-        60px 30px;
-
-    text-align:
-        center;
-
-    border-radius:
-        10px;
+    background: white;
+    padding: 60px 30px;
+    text-align: center;
+    border-radius: 10px;
 
     box-shadow:
         0 2px 10px
-        rgba(
-            0,
-            0,
-            0,
-            0.05
-        );
+        rgba(0,0,0,0.05);
 }
-
-
-.empty h2 {
-    margin-bottom:
-        10px;
-}
-
-
-.empty p {
-    color:
-        #666;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| PAGINATION
-|--------------------------------------------------------------------------
-*/
 
 .pagination-wrapper {
-    margin-top:
-        30px;
-
-    display:
-        flex;
-
-    justify-content:
-        center;
-
-    align-items:
-        center;
+    margin-top: 30px;
+    display: flex;
+    justify-content: center;
 }
-
 
 .pagination {
-    display:
-        flex;
-
-    gap:
-        6px;
-
-    align-items:
-        center;
-
-    flex-wrap:
-        wrap;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
 }
-
 
 .pagination a,
 .pagination span {
-    min-width:
-        38px;
+    min-width: 38px;
+    height: 38px;
+    padding: 0 12px;
 
-    height:
-        38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 
-    padding:
-        0 12px;
-
-    display:
-        flex;
-
-    align-items:
-        center;
-
-    justify-content:
-        center;
-
-    border-radius:
-        6px;
-
-    text-decoration:
-        none;
-
-    border:
-        1px solid #ddd;
-
-    background:
-        white;
-
-    color:
-        #333;
-
-    font-size:
-        14px;
+    border-radius: 6px;
+    text-decoration: none;
+    border: 1px solid #ddd;
+    background: white;
+    color: #333;
+    font-size: 14px;
 }
-
-
-.pagination a:hover {
-    background:
-        #eff6ff;
-
-    border-color:
-        #2563eb;
-
-    color:
-        #2563eb;
-}
-
 
 .pagination .active {
-    background:
-        #2563eb;
-
-    color:
-        white;
-
-    border-color:
-        #2563eb;
-
-    font-weight:
-        bold;
+    background: #2563eb;
+    color: white;
+    border-color: #2563eb;
+    font-weight: bold;
 }
-
 
 .pagination .disabled {
-    color:
-        #aaa;
-
-    background:
-        #f3f4f6;
+    color: #aaa;
+    background: #f3f4f6;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| RESPONSIVE
-|--------------------------------------------------------------------------
-*/
-
-@media (
-    max-width: 850px
-) {
+@media (max-width: 850px) {
 
     .applicant-grid {
-        grid-template-columns:
-            1fr;
+        grid-template-columns: 1fr;
     }
 }
 
-
-@media (
-    max-width: 650px
-) {
-
-    .navbar {
-        padding:
-            15px 20px;
-
-        flex-direction:
-            column;
-
-        align-items:
-            flex-start;
-
-        gap:
-            12px;
-    }
-
-
-    .nav-links {
-        flex-wrap:
-            wrap;
-    }
-
+@media (max-width: 650px) {
 
     .filters form {
-        grid-template-columns:
-            1fr;
+        grid-template-columns: 1fr;
     }
 
-
     .result-summary {
-        flex-direction:
-            column;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+    }
 
-        align-items:
-            flex-start;
-
-        gap:
-            5px;
+    .score-grid {
+        grid-template-columns: 1fr;
     }
 }
 
+@media (max-width: 500px) {
 
-@media (
-    max-width: 500px
-) {
-
-    .card-header {
-        flex-direction:
-            column;
-    }
-
-
+    .card-header,
     .card-footer {
-        flex-direction:
-            column;
-
-        align-items:
-            stretch;
-    }
-
-
-    .view-btn {
-        text-align:
-            center;
+        flex-direction: column;
+        align-items: stretch;
     }
 }
 
@@ -1527,75 +952,13 @@ select {
 
 </head>
 
-
 <body>
 
-
-<!-- =========================================================
-     NAVBAR
-========================================================= -->
-
-<nav class="navbar">
-
-
-    <div class="logo">
-
-        JobPortal
-
-    </div>
-
-
-    <div class="nav-links">
-
-
-        <a href="../index.php">
-            Home
-        </a>
-
-
-        <a href="dashboard.php">
-            Dashboard
-        </a>
-
-
-        <a href="profile.php">
-            Profile
-        </a>
-
-
-        <a href="jobs.php">
-            My Jobs
-        </a>
-
-
-        <a
-            href="applicants.php"
-            class="active"
-        >
-            Applicants
-        </a>
-
-
-        <a
-            href="../logout.php"
-            class="logout"
-        >
-            Logout
-        </a>
-
-
-    </div>
-
-
-</nav>
-
-
-<!-- =========================================================
-     MAIN
-========================================================= -->
+<?php
+require __DIR__ . "/includes/header.php";
+?>
 
 <div class="container">
-
 
     <div class="header">
 
@@ -1604,899 +967,682 @@ select {
         </h1>
 
         <p>
-            Review applicants and see
-            their resume match results.
+            Review applicants, qualification matching,
+            and skill-gap results.
         </p>
 
     </div>
-
-
-    <!-- SUCCESS -->
 
     <?php if ($success): ?>
 
         <div class="message success">
 
-            <?= htmlspecialchars(
-                $success
-            ) ?>
+            <?= htmlspecialchars($success) ?>
 
         </div>
 
     <?php endif; ?>
 
-
-    <!-- ERROR -->
 
     <?php if ($error): ?>
 
         <div class="message error">
 
-            <?= htmlspecialchars(
-                $error
-            ) ?>
+            <?= htmlspecialchars($error) ?>
 
         </div>
 
     <?php endif; ?>
 
 
-    <!-- =====================================================
-         FILTERS
-    ====================================================== -->
-
     <div class="filters">
 
-
         <form method="GET">
-
 
             <input
                 type="text"
                 name="search"
                 class="input"
-
                 placeholder="Search applicant or job..."
-
-                value="<?= htmlspecialchars(
-                    $search
-                ) ?>"
+                value="<?= htmlspecialchars($search) ?>"
             >
-
 
             <select name="job_id">
 
-
                 <option value="0">
-
                     All Jobs
-
                 </option>
 
-
-                <?php foreach (
-                    $jobs
-                    as
-                    $job
-                ): ?>
-
+                <?php foreach ($jobs as $job): ?>
 
                     <option
                         value="<?= (int) $job["id"] ?>"
-
-                        <?= $jobId ===
-                            (int) $job["id"]
+                        <?= $jobId === (int) $job["id"]
                             ? "selected"
                             : ""
                         ?>
                     >
-
-                        <?= htmlspecialchars(
-                            $job[
-                                "job_title"
-                            ]
-                        ) ?>
-
+                        <?= htmlspecialchars($job["job_title"]) ?>
                     </option>
-
 
                 <?php endforeach; ?>
 
-
             </select>
-
 
             <button
                 type="submit"
                 class="filter-btn"
             >
-
                 Search / Filter
-
             </button>
-
 
         </form>
 
-
-        <?php if (
-            $search !== "" ||
-            $jobId > 0
-        ): ?>
-
+        <?php if ($search !== "" || $jobId > 0): ?>
 
             <a
                 href="applicants.php"
                 class="clear-btn"
             >
-
                 Clear Filters
-
             </a>
-
 
         <?php endif; ?>
 
-
     </div>
 
-
-    <!-- =====================================================
-         RESULT SUMMARY
-    ====================================================== -->
 
     <div class="result-summary">
 
-
         <div>
-
             <strong>
                 <?= $totalApplicants ?>
             </strong>
-
             applicant(s) found
-
         </div>
 
-
-        <?php if (
-            $totalApplicants > 0
-        ): ?>
-
+        <?php if ($totalApplicants > 0): ?>
 
             <div>
-
                 Showing
-
-                <strong>
-                    <?= $offset + 1 ?>
-                </strong>
-
+                <strong><?= $offset + 1 ?></strong>
                 -
-
                 <strong>
-
                     <?= min(
-                        $offset +
-                        $perPage,
+                        $offset + $perPage,
                         $totalApplicants
                     ) ?>
-
                 </strong>
-
                 of
-
                 <strong>
                     <?= $totalApplicants ?>
                 </strong>
-
             </div>
 
-
         <?php endif; ?>
-
 
     </div>
 
 
-    <!-- =====================================================
-         APPLICANTS
-    ====================================================== -->
-
-    <?php if (
-        count(
-            $applicants
-        ) > 0
-    ): ?>
-
+    <?php if (count($applicants) > 0): ?>
 
         <div class="applicant-grid">
 
-
-            <?php foreach (
-                $applicants
-                as
-                $applicant
-            ): ?>
-
+            <?php foreach ($applicants as $applicant): ?>
 
                 <?php
 
-                /*
-                |--------------------------------------------------------------------------
-                | MATCH SCORE
-                |--------------------------------------------------------------------------
-                */
+                $matchScore = clampScore(
+                    $applicant["match_score"] ?? 0
+                );
 
-                $matchScore =
-                    (float) (
-                        $applicant[
-                            "match_score"
-                        ]
-                        ?? 0
-                    );
+                $skillsScore = clampScore(
+                    $applicant["skills_score"] ?? 0
+                );
 
+                $educationScore = clampScore(
+                    $applicant["education_score"] ?? 0
+                );
 
-                if (
-                    $matchScore < 0
-                ) {
-                    $matchScore = 0;
-                }
+                $tesdaScore = clampScore(
+                    $applicant["tesda_score"] ?? 0
+                );
 
+                $matchLabel = getMatchLabel(
+                    $matchScore
+                );
 
-                if (
-                    $matchScore > 100
-                ) {
-                    $matchScore = 100;
-                }
-
-
-                /*
-                |--------------------------------------------------------------------------
-                | DISPLAY AS WHOLE NUMBER
-                |--------------------------------------------------------------------------
-                |
-                | Example:
-                |
-                | 51.34 -> 51%
-                | 67.80 -> 68%
-                | 83.20 -> 83%
-                |
-                */
-
-                $displayScore =
-                    (int) round(
-                        $matchScore
-                    );
-
-
-                $matchLabel =
-                    getMatchLabel(
-                        $matchScore
-                    );
-
-
-                $matchClass =
-                    getMatchClass(
-                        $matchScore
-                    );
-
+                $matchClass = getMatchClass(
+                    $matchScore
+                );
 
                 $statusClass =
-
                     "status-"
-
                     . strtolower(
-                        $applicant[
-                            "status"
-                        ]
+                        $applicant["status"]
                     );
 
                 ?>
 
-
                 <div class="applicant-card">
-
-
-                    <!-- =========================
-                         HEADER
-                    ========================== -->
 
                     <div class="card-header">
 
-
                         <div>
-
 
                             <div class="applicant-name">
 
                                 <?= htmlspecialchars(
-                                    $applicant[
-                                        "first_name"
-                                    ]
+                                    $applicant["first_name"]
                                     . " "
-                                    . $applicant[
-                                        "last_name"
-                                    ]
+                                    . $applicant["last_name"]
                                 ) ?>
 
                             </div>
-
 
                             <div class="job-title">
 
                                 <?= htmlspecialchars(
+                                    $applicant["job_title"]
+                                ) ?>
+
+                            </div>
+
+                            <div class="applied-date">
+
+                                Applied:
+                                <?= date(
+                                    "M d, Y",
+                                    strtotime(
+                                        $applicant["applied_at"]
+                                    )
+                                ) ?>
+
+                            </div>
+
+                        </div>
+
+                        <span
+                            class="status <?= htmlspecialchars(
+                                $statusClass
+                            ) ?>"
+                        >
+                            <?= ucfirst(
+                                htmlspecialchars(
+                                    $applicant["status"]
+                                )
+                            ) ?>
+                        </span>
+
+                    </div>
+
+
+                    <div class="info-list">
+
+                        <?php if (!empty($applicant["phone"])): ?>
+
+                            <div class="info-item">
+
+                                <strong>Phone:</strong>
+
+                                <?= htmlspecialchars(
+                                    $applicant["phone"]
+                                ) ?>
+
+                            </div>
+
+                        <?php endif; ?>
+
+                        <?php if (!empty($applicant["address"])): ?>
+
+                            <div class="info-item">
+
+                                <strong>Address:</strong>
+
+                                <?= htmlspecialchars(
+                                    $applicant["address"]
+                                ) ?>
+
+                            </div>
+
+                        <?php endif; ?>
+
+                    </div>
+
+
+                    <div class="match-box">
+
+                        <div class="match-top">
+
+                            <div class="match-left">
+
+                                <span class="match-label">
+                                    Explainable Job Match
+                                </span>
+
+                                <span
+                                    class="match-category <?= htmlspecialchars(
+                                        $matchClass
+                                    ) ?>"
+                                >
+                                    <?= htmlspecialchars(
+                                        $matchLabel
+                                    ) ?>
+                                </span>
+
+                            </div>
+
+                            <span class="match-score">
+
+                                <?= number_format(
+                                    $matchScore,
+                                    0
+                                ) ?>%
+
+                            </span>
+
+                        </div>
+
+                        <div class="progress">
+
+                            <div
+                                class="progress-bar"
+                                style="width:<?= $matchScore ?>%;"
+                            ></div>
+
+                        </div>
+
+
+                        <div class="score-grid">
+
+                            <div class="score-card">
+
+                                <span>
+                                    Skills
+                                </span>
+
+                                <strong>
+                                    <?= number_format(
+                                        $skillsScore,
+                                        0
+                                    ) ?>%
+                                </strong>
+
+                            </div>
+
+                            <div class="score-card">
+
+                                <span>
+                                    Education
+                                </span>
+
+                                <strong>
+                                    <?= number_format(
+                                        $educationScore,
+                                        0
+                                    ) ?>%
+                                </strong>
+
+                            </div>
+
+                            <div class="score-card">
+
+                                <span>
+                                    TESDA / NC
+                                </span>
+
+                                <strong>
+                                    <?= number_format(
+                                        $tesdaScore,
+                                        0
+                                    ) ?>%
+                                </strong>
+
+                            </div>
+
+                        </div>
+
+
+                        <?php if (!empty($applicant["matched_skills"])): ?>
+
+                            <div class="detail-block">
+
+                                <strong>
+                                    Matched Skills:
+                                </strong>
+
+                                <?= htmlspecialchars(
+                                    $applicant["matched_skills"]
+                                ) ?>
+
+                            </div>
+
+                        <?php endif; ?>
+
+
+                        <?php if (!empty($applicant["missing_skills"])): ?>
+
+                            <div class="detail-block">
+
+                                <strong>
+                                    Missing Skills:
+                                </strong>
+
+                                <?= htmlspecialchars(
+                                    $applicant["missing_skills"]
+                                ) ?>
+
+                            </div>
+
+                        <?php endif; ?>
+
+
+                        <?php if (!empty(
+                            $applicant["matched_qualifications"]
+                        )): ?>
+
+                            <div class="detail-block">
+
+                                <strong>
+                                    Matched Qualifications:
+                                </strong>
+
+                                <?= htmlspecialchars(
                                     $applicant[
-                                        "job_title"
+                                        "matched_qualifications"
                                     ]
                                 ) ?>
 
                             </div>
 
+                        <?php endif; ?>
 
-                            <div class="applied-date">
 
-                                Applied:
+                        <?php if (!empty(
+                            $applicant["missing_qualifications"]
+                        )): ?>
 
-                                <?= date(
-                                    "M d, Y h:i A",
-                                    strtotime(
+                            <div class="detail-block">
+
+                                <strong>
+                                    Missing Qualifications:
+                                </strong>
+
+                                <?= htmlspecialchars(
+                                    $applicant[
+                                        "missing_qualifications"
+                                    ]
+                                ) ?>
+
+                            </div>
+
+                        <?php endif; ?>
+
+
+                        <?php if (!empty(
+                            $applicant["qualification_explanation"]
+                        )): ?>
+
+                            <div class="explanation-box">
+
+                                <strong>
+                                    Why this applicant matched:
+                                </strong>
+
+                                <br>
+
+                                <?= nl2br(
+                                    htmlspecialchars(
                                         $applicant[
-                                            "applied_at"
+                                            "qualification_explanation"
                                         ]
                                     )
                                 ) ?>
 
                             </div>
 
+                        <?php endif; ?>
 
-                        </div>
 
+                        <?php if (!empty(
+                            $applicant["skill_gap_feedback"]
+                        )): ?>
 
-                        <span
-                            class="
-                                status
-                                <?= htmlspecialchars(
-                                    $statusClass
+                            <div class="gap-box">
+
+                                <strong>
+                                    Skill Gap Feedback:
+                                </strong>
+
+                                <br>
+
+                                <?= nl2br(
+                                    htmlspecialchars(
+                                        $applicant[
+                                            "skill_gap_feedback"
+                                        ]
+                                    )
                                 ) ?>
-                            "
+
+                            </div>
+
+                        <?php endif; ?>
+
+                    </div>
+
+
+                    <form
+                        method="POST"
+                        class="status-form"
+                    >
+
+                        <input
+                            type="hidden"
+                            name="application_id"
+                            value="<?= (int)
+                                $applicant["application_id"]
+                            ?>"
                         >
 
-                            <?= ucfirst(
-                                htmlspecialchars(
-                                    $applicant[
-                                        "status"
-                                    ]
-                                )
-                            ) ?>
+                        <div class="status-form-row">
 
-                        </span>
+                            <select name="status">
 
+                                <?php
+                                $statuses = [
+                                    "pending",
+                                    "reviewed",
+                                    "shortlisted",
+                                    "rejected",
+                                    "hired"
+                                ];
+                                ?>
 
-                    </div>
+                                <?php foreach ($statuses as $status): ?>
 
+                                    <option
+                                        value="<?= htmlspecialchars(
+                                            $status
+                                        ) ?>"
+                                        <?= $applicant["status"] === $status
+                                            ? "selected"
+                                            : ""
+                                        ?>
+                                    >
+                                        <?= ucfirst(
+                                            htmlspecialchars(
+                                                $status
+                                            )
+                                        ) ?>
+                                    </option>
 
-                    <!-- =========================
-                         APPLICANT INFO
-                    ========================== -->
+                                <?php endforeach; ?>
 
-                    <div class="info-list">
+                            </select>
 
-
-                        <?php if (
-                            !empty(
-                                $applicant[
-                                    "phone"
-                                ]
-                            )
-                        ): ?>
-
-
-                            <div class="info-item">
-
-                                <strong>
-                                    Phone:
-                                </strong>
-
-                                <?= htmlspecialchars(
-                                    $applicant[
-                                        "phone"
-                                    ]
-                                ) ?>
-
-                            </div>
-
-
-                        <?php endif; ?>
-
-
-                        <?php if (
-                            !empty(
-                                $applicant[
-                                    "address"
-                                ]
-                            )
-                        ): ?>
-
-
-                            <div class="info-item">
-
-                                <strong>
-                                    Address:
-                                </strong>
-
-                                <?= htmlspecialchars(
-                                    $applicant[
-                                        "address"
-                                    ]
-                                ) ?>
-
-                            </div>
-
-
-                        <?php endif; ?>
-
-
-                    </div>
-
-
-                    <!-- =========================
-                         MATCH RESULT
-                    ========================== -->
-
-                    <div class="match-box">
-
-
-                        <div class="match-top">
-
-
-                            <div class="match-left">
-
-
-                                <span class="match-label">
-
-                                    Resume Match
-
-                                </span>
-
-
-                                <span
-                                    class="
-                                        match-category
-                                        <?= $matchClass ?>
-                                    "
-                                >
-
-                                    <?= htmlspecialchars(
-                                        $matchLabel
-                                    ) ?>
-
-                                </span>
-
-
-                            </div>
-
-
-                            <span class="match-score">
-
-                                <?= $displayScore ?>%
-
-                            </span>
-
+                            <button
+                                type="submit"
+                                class="status-btn"
+                            >
+                                Update
+                            </button>
 
                         </div>
 
+                    </form>
 
-                        <!-- PROGRESS BAR -->
-
-                        <div class="progress">
-
-
-                            <div
-                                class="progress-bar"
-
-                                style="
-                                    width:
-                                    <?= htmlspecialchars(
-                                        (string) $matchScore
-                                    ) ?>%;
-                                "
-                            ></div>
-
-
-                        </div>
-
-
-                        <!-- MATCHED SKILLS -->
-
-                        <?php if (
-                            !empty(
-                                $applicant[
-                                    "matched_skills"
-                                ]
-                            )
-                        ): ?>
-
-
-                            <div class="skills">
-
-                                <strong>
-                                    Matched:
-                                </strong>
-
-                                <?= htmlspecialchars(
-                                    $applicant[
-                                        "matched_skills"
-                                    ]
-                                ) ?>
-
-                            </div>
-
-
-                        <?php endif; ?>
-
-
-                        <!-- MISSING SKILLS -->
-
-                        <?php if (
-                            !empty(
-                                $applicant[
-                                    "missing_skills"
-                                ]
-                            )
-                        ): ?>
-
-
-                            <div class="skills">
-
-                                <strong>
-                                    Missing:
-                                </strong>
-
-                                <?= htmlspecialchars(
-                                    $applicant[
-                                        "missing_skills"
-                                    ]
-                                ) ?>
-
-                            </div>
-
-
-                        <?php endif; ?>
-
-
-                    </div>
-
-
-                    <!-- =========================
-                         FOOTER
-                    ========================== -->
 
                     <div class="card-footer">
 
-
-                        <?php if (
-                            !empty(
-                                $applicant[
-                                    "file_path"
-                                ]
-                            )
-                        ): ?>
-
+                        <?php if (!empty(
+                            $applicant["file_path"]
+                        )): ?>
 
                             <a
                                 href="../<?= htmlspecialchars(
-                                    $applicant[
-                                        "file_path"
-                                    ]
+                                    $applicant["file_path"]
                                 ) ?>"
-
                                 target="_blank"
-
                                 class="resume-link"
                             >
-
                                 View Resume
-
                             </a>
-
 
                         <?php else: ?>
 
-
-                            <span
-                                style="
-                                    color:#999;
-                                    font-size:13px;
-                                "
-                            >
-
+                            <span class="resume-link">
                                 No Resume
-
                             </span>
-
 
                         <?php endif; ?>
 
 
                         <a
-                            href="view-application.php?id=<?= (int) $applicant["application_id"] ?>"
-
+                            href="view-application.php?id=<?= (int)
+                                $applicant["application_id"]
+                            ?>"
                             class="view-btn"
                         >
-
-                            View Application
-
+                            View Details
                         </a>
-
 
                     </div>
 
-
                 </div>
 
-
             <?php endforeach; ?>
-
 
         </div>
 
 
-        <!-- =================================================
-             PAGINATION
-        ================================================== -->
-
-        <?php if (
-            $totalPages > 1
-        ): ?>
-
+        <?php if ($totalPages > 1): ?>
 
             <div class="pagination-wrapper">
 
-
                 <div class="pagination">
 
+                    <?php if ($page > 1): ?>
 
-                    <!-- PREVIOUS -->
-
-                    <?php if (
-                        $page > 1
-                    ): ?>
-
-
-                        <a
-                            href="<?= htmlspecialchars(
-                                buildPageUrl(
-                                    $page - 1
-                                )
-                            ) ?>"
-                        >
-
+                        <a href="<?= htmlspecialchars(
+                            buildPageUrl(
+                                $page - 1
+                            )
+                        ) ?>">
                             Previous
-
                         </a>
-
 
                     <?php else: ?>
 
-
                         <span class="disabled">
-
                             Previous
-
                         </span>
-
 
                     <?php endif; ?>
 
 
                     <?php
+                    $startPage = max(
+                        1,
+                        $page - 2
+                    );
 
-                    $startPage =
-                        max(
-                            1,
-                            $page - 2
-                        );
-
-
-                    $endPage =
-                        min(
-                            $totalPages,
-                            $page + 2
-                        );
-
+                    $endPage = min(
+                        $totalPages,
+                        $page + 2
+                    );
                     ?>
 
 
-                    <!-- FIRST PAGE -->
-
-                    <?php if (
-                        $startPage > 1
-                    ): ?>
-
-
-                        <a
-                            href="<?= htmlspecialchars(
-                                buildPageUrl(
-                                    1
-                                )
-                            ) ?>"
-                        >
-
-                            1
-
-                        </a>
-
-
-                        <?php if (
-                            $startPage > 2
-                        ): ?>
-
-
-                            <span>
-                                ...
-                            </span>
-
-
-                        <?php endif; ?>
-
-
-                    <?php endif; ?>
-
-
-                    <!-- PAGE NUMBERS -->
-
                     <?php for (
-                        $i = $startPage;
-                        $i <= $endPage;
-                        $i++
+                        $pageNumber = $startPage;
+                        $pageNumber <= $endPage;
+                        $pageNumber++
                     ): ?>
 
-
-                        <?php if (
-                            $i === $page
-                        ): ?>
-
+                        <?php if ($pageNumber === $page): ?>
 
                             <span class="active">
-
-                                <?= $i ?>
-
+                                <?= $pageNumber ?>
                             </span>
-
 
                         <?php else: ?>
 
-
-                            <a
-                                href="<?= htmlspecialchars(
-                                    buildPageUrl(
-                                        $i
-                                    )
-                                ) ?>"
-                            >
-
-                                <?= $i ?>
-
+                            <a href="<?= htmlspecialchars(
+                                buildPageUrl(
+                                    $pageNumber
+                                )
+                            ) ?>">
+                                <?= $pageNumber ?>
                             </a>
 
-
                         <?php endif; ?>
-
 
                     <?php endfor; ?>
 
 
-                    <!-- LAST PAGE -->
+                    <?php if ($page < $totalPages): ?>
 
-                    <?php if (
-                        $endPage <
-                        $totalPages
-                    ): ?>
-
-
-                        <?php if (
-                            $endPage <
-                            $totalPages - 1
-                        ): ?>
-
-
-                            <span>
-                                ...
-                            </span>
-
-
-                        <?php endif; ?>
-
-
-                        <a
-                            href="<?= htmlspecialchars(
-                                buildPageUrl(
-                                    $totalPages
-                                )
-                            ) ?>"
-                        >
-
-                            <?= $totalPages ?>
-
-                        </a>
-
-
-                    <?php endif; ?>
-
-
-                    <!-- NEXT -->
-
-                    <?php if (
-                        $page <
-                        $totalPages
-                    ): ?>
-
-
-                        <a
-                            href="<?= htmlspecialchars(
-                                buildPageUrl(
-                                    $page + 1
-                                )
-                            ) ?>"
-                        >
-
+                        <a href="<?= htmlspecialchars(
+                            buildPageUrl(
+                                $page + 1
+                            )
+                        ) ?>">
                             Next
-
                         </a>
-
 
                     <?php else: ?>
 
-
                         <span class="disabled">
-
                             Next
-
                         </span>
-
 
                     <?php endif; ?>
 
-
                 </div>
 
-
             </div>
-
 
         <?php endif; ?>
 
 
     <?php else: ?>
 
-
         <div class="empty">
-
 
             <h2>
                 No Applicants Found
             </h2>
 
-
             <p>
-
-                No applicants match
-                your current search
-                or filter.
-
+                No applications match your
+                current search or job filter.
             </p>
-
 
         </div>
 
-
     <?php endif; ?>
-
 
 </div>
 
-
 </body>
-
 </html>
