@@ -125,6 +125,7 @@ function verificationStatusClass(?string $status): string
     }
 }
 
+
 function verificationStatusLabel(?string $status): string
 {
     if (!$status) {
@@ -172,19 +173,24 @@ $stmt = $pdo->prepare("
 
 $stmt->execute([$userId]);
 
-$employer = $stmt->fetch(PDO::FETCH_ASSOC);
+$employer =
+    $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$employer) {
     die("Employer profile not found.");
 }
 
-$employerId = (int) $employer["id"];
+$employerId =
+    (int) $employer["id"];
 
-$employerType = $employer["employer_type"] ?? "private";
+$employerType =
+    $employer["employer_type"]
+    ?? "private";
 
-$employerTypeLabel = $employerType === "lgu"
-    ? "Local Government Unit (LGU)"
-    : "Private Employer";
+$employerTypeLabel =
+    $employerType === "lgu"
+        ? "Local Government Unit (LGU)"
+        : "Private Employer";
 
 
 /*
@@ -202,7 +208,8 @@ $stmt = $pdo->prepare("
 
 $stmt->execute([$employerId]);
 
-$verification = $stmt->fetch(PDO::FETCH_ASSOC);
+$verification =
+    $stmt->fetch(PDO::FETCH_ASSOC);
 
 
 /*
@@ -213,42 +220,58 @@ $verification = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
     try {
-        $companyName = trim(
-            $_POST["company_name"] ?? ""
-        );
+        $companyName =
+            trim(
+                $_POST["company_name"]
+                ?? ""
+            );
 
-        $companyDescription = trim(
-            $_POST["company_description"] ?? ""
-        );
+        $companyDescription =
+            trim(
+                $_POST["company_description"]
+                ?? ""
+            );
 
-        $contactPerson = trim(
-            $_POST["contact_person"] ?? ""
-        );
+        $contactPerson =
+            trim(
+                $_POST["contact_person"]
+                ?? ""
+            );
 
-        $contactNumber = trim(
-            $_POST["contact_number"] ?? ""
-        );
+        $contactNumber =
+            trim(
+                $_POST["contact_number"]
+                ?? ""
+            );
 
-        $address = trim(
-            $_POST["address"] ?? ""
-        );
+        $address =
+            trim(
+                $_POST["address"]
+                ?? ""
+            );
 
-        $barangay = trim(
-            $_POST["barangay"] ?? ""
-        );
+        $barangay =
+            trim(
+                $_POST["barangay"]
+                ?? ""
+            );
 
-        $latitude = trim(
-            $_POST["latitude"] ?? ""
-        );
+        $latitude =
+            trim(
+                $_POST["latitude"]
+                ?? ""
+            );
 
-        $longitude = trim(
-            $_POST["longitude"] ?? ""
-        );
+        $longitude =
+            trim(
+                $_POST["longitude"]
+                ?? ""
+            );
 
 
         /*
         |--------------------------------------------------------------------------
-        | VALIDATION
+        | BASIC VALIDATION
         |--------------------------------------------------------------------------
         */
 
@@ -284,7 +307,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         */
 
         $caloocanArea = null;
-        $barangayNumber = null;
 
         preg_match(
             '/\d+/',
@@ -318,7 +340,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         /*
         |--------------------------------------------------------------------------
-        | LOCATION VALIDATION
+        | MAP LOCATION VALIDATION
         |--------------------------------------------------------------------------
         */
 
@@ -327,7 +349,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             $longitude === ""
         ) {
             throw new Exception(
-                "Please set your business or organization location."
+                "Please locate the address on the map before saving."
             );
         }
 
@@ -336,12 +358,15 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             !is_numeric($longitude)
         ) {
             throw new Exception(
-                "Invalid latitude or longitude."
+                "Invalid map coordinates."
             );
         }
 
-        $latitudeValue = (float) $latitude;
-        $longitudeValue = (float) $longitude;
+        $latitudeValue =
+            (float) $latitude;
+
+        $longitudeValue =
+            (float) $longitude;
 
         if (
             $latitudeValue < -90 ||
@@ -364,78 +389,57 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         /*
         |--------------------------------------------------------------------------
-        | UPDATE EMPLOYER
+        | BASIC CALOOCAN BOUNDARY CHECK
         |--------------------------------------------------------------------------
         |
-        | employer_type is intentionally NOT updated here.
-        | It comes from registration and is reviewed by the admin.
+        | Approximate geographic check only.
+        | Final location verification is still performed by the admin.
         |
         */
 
-        $stmt = $pdo->prepare("
-            UPDATE employers
-            SET
-                company_name = ?,
-                company_description = ?,
-                contact_person = ?,
-                contact_number = ?,
-                address = ?,
-                barangay = ?,
-                latitude = ?,
-                longitude = ?,
-                caloocan_area = ?,
-                verification_status = 'pending',
-                updated_at = NOW()
-            WHERE id = ?
-        ");
-
-        $stmt->execute([
-            $companyName,
-
-            $companyDescription !== ""
-                ? $companyDescription
-                : null,
-
-            $contactPerson,
-
-            $contactNumber !== ""
-                ? $contactNumber
-                : null,
-
-            $address,
-            $barangay,
-            $latitudeValue,
-            $longitudeValue,
-            $caloocanArea,
-            $employerId
-        ]);
+        if (
+            $latitudeValue < 14.60 ||
+            $latitudeValue > 14.83 ||
+            $longitudeValue < 120.94 ||
+            $longitudeValue > 121.11
+        ) {
+            throw new Exception(
+                "The selected map location does not appear to be within Caloocan City."
+            );
+        }
 
 
         /*
         |--------------------------------------------------------------------------
-        | UPLOAD DOCUMENTS
+        | DOCUMENT UPLOADS
         |--------------------------------------------------------------------------
         */
 
-        $governmentId = uploadDocument(
-            $_FILES["government_id"] ?? null,
-            $uploadDir
-        );
+        $governmentId =
+            uploadDocument(
+                $_FILES["government_id"]
+                ?? null,
+                $uploadDir
+            );
 
-        $barangayCertificate = uploadDocument(
-            $_FILES["barangay_certificate"] ?? null,
-            $uploadDir
-        );
+        $barangayCertificate =
+            uploadDocument(
+                $_FILES["barangay_certificate"]
+                ?? null,
+                $uploadDir
+            );
 
-        $businessPermit = uploadDocument(
-            $_FILES["business_permit"] ?? null,
-            $uploadDir
-        );
+        $businessPermit =
+            uploadDocument(
+                $_FILES["business_permit"]
+                ?? null,
+                $uploadDir
+            );
 
 
         /*
         |--------------------------------------------------------------------------
-        | KEEP OLD DOCUMENTS
+        | KEEP EXISTING DOCUMENTS
         |--------------------------------------------------------------------------
         */
 
@@ -478,10 +482,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             );
         }
 
-        /*
-         * Business Permit is required for Private Employers.
-         * LGU employers do not need a Business Permit.
-         */
         if (
             $employerType === "private" &&
             !$businessPermit
@@ -490,6 +490,53 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 "Business Permit is required for Private Employers."
             );
         }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | SAVE EMPLOYER
+        |--------------------------------------------------------------------------
+        */
+
+        $pdo->beginTransaction();
+
+        $stmt = $pdo->prepare("
+            UPDATE employers
+            SET
+                company_name = ?,
+                company_description = ?,
+                contact_person = ?,
+                contact_number = ?,
+                address = ?,
+                barangay = ?,
+                latitude = ?,
+                longitude = ?,
+                caloocan_area = ?,
+                verification_status = 'pending',
+                updated_at = NOW()
+            WHERE id = ?
+        ");
+
+        $stmt->execute([
+            $companyName,
+
+            $companyDescription !== ""
+                ? $companyDescription
+                : null,
+
+            $contactPerson,
+
+            $contactNumber !== ""
+                ? $contactNumber
+                : null,
+
+            $address,
+            $barangay,
+            $latitudeValue,
+            $longitudeValue,
+            $caloocanArea,
+            $employerId
+        ]);
 
 
         /*
@@ -505,7 +552,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     government_id = ?,
                     barangay_certificate = ?,
                     business_permit = ?,
-                    detected_address = NULL,
+                    detected_address = ?,
                     document_status = 'pending',
                     location_status = 'pending',
                     admin_status = 'pending',
@@ -517,6 +564,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $governmentId,
                 $barangayCertificate,
                 $businessPermit,
+                $address,
                 $employerId
             ]);
         } else {
@@ -533,11 +581,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     submitted_at
                 )
                 VALUES (
-                    ?,
-                    ?,
-                    ?,
-                    ?,
-                    NULL,
+                    ?, ?, ?, ?, ?,
                     'pending',
                     'pending',
                     'pending',
@@ -549,16 +593,12 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $employerId,
                 $governmentId,
                 $barangayCertificate,
-                $businessPermit
+                $businessPermit,
+                $address
             ]);
         }
 
-
-        /*
-        |--------------------------------------------------------------------------
-        | SUCCESS
-        |--------------------------------------------------------------------------
-        */
+        $pdo->commit();
 
         $success =
             "Profile saved successfully. Your information has been submitted for verification.";
@@ -627,7 +667,12 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             $stmt->fetch(PDO::FETCH_ASSOC);
 
     } catch (Throwable $e) {
-        $error = $e->getMessage();
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        $error =
+            $e->getMessage();
     }
 }
 
@@ -667,363 +712,387 @@ $adminNotes =
 
 <head>
 
-    <meta charset="UTF-8">
+<meta charset="UTF-8">
 
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
+<meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+>
 
-    <title>
-        Employer Profile - Caloocan Job Portal
-    </title>
+<title>
+    Employer Profile - Caloocan Job Portal
+</title>
 
-    <style>
+<style>
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
 
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
+body {
+    font-family: Arial, Helvetica, sans-serif;
+    background: #f5f7fb;
+    color: #333;
+}
 
-        body {
-            font-family: Arial, Helvetica, sans-serif;
-            background: #f5f7fb;
-            color: #333;
-        }
+.container {
+    max-width: 1200px;
+    margin: 40px auto;
+    padding: 0 20px 50px;
+}
 
-        .container {
-            max-width: 1200px;
-            margin: 40px auto;
-            padding: 0 20px 50px;
-        }
+.welcome {
+    margin-bottom: 30px;
+}
 
-        .welcome {
-            margin-bottom: 30px;
-        }
+.welcome h1 {
+    margin-bottom: 8px;
+}
 
-        .welcome h1 {
-            margin-bottom: 8px;
-        }
+.welcome p {
+    color: #64748b;
+    line-height: 1.6;
+}
 
-        .welcome p {
-            color: #64748b;
-            line-height: 1.6;
-        }
+.profile-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 25px;
+    align-items: start;
+}
 
-        .profile-grid {
-            display: grid;
-            grid-template-columns: 2fr 1fr;
-            gap: 25px;
-            align-items: start;
-        }
+.card {
+    margin-bottom: 20px;
+    padding: 25px;
+    background: #ffffff;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
 
-        .card {
-            margin-bottom: 20px;
-            padding: 25px;
-            background: #fff;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
-        }
+.card h2 {
+    margin-bottom: 8px;
+}
 
-        .card h2 {
-            margin-bottom: 8px;
-        }
+.card-description {
+    margin-bottom: 22px;
+    color: #64748b;
+    font-size: 14px;
+    line-height: 1.6;
+}
 
-        .card-description {
-            margin-bottom: 22px;
-            color: #64748b;
-            font-size: 14px;
-            line-height: 1.6;
-        }
+.alert {
+    margin-bottom: 20px;
+    padding: 15px 18px;
+    border-radius: 8px;
+    line-height: 1.5;
+}
 
-        .alert {
-            margin-bottom: 20px;
-            padding: 15px 18px;
-            border-radius: 8px;
-            line-height: 1.5;
-        }
+.alert-success {
+    background: #dcfce7;
+    border: 1px solid #bbf7d0;
+    color: #166534;
+}
 
-        .alert-success {
-            background: #dcfce7;
-            border: 1px solid #bbf7d0;
-            color: #166534;
-        }
+.alert-error {
+    background: #fee2e2;
+    border: 1px solid #fecaca;
+    color: #991b1b;
+}
 
-        .alert-error {
-            background: #fee2e2;
-            border: 1px solid #fecaca;
-            color: #991b1b;
-        }
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 18px;
+}
 
-        .form-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 18px;
-        }
+.form-group {
+    margin-bottom: 18px;
+}
 
-        .form-group {
-            margin-bottom: 18px;
-        }
+.form-group.full {
+    grid-column: 1 / -1;
+}
 
-        .form-group.full {
-            grid-column: 1 / -1;
-        }
+label {
+    display: block;
+    margin-bottom: 7px;
+    font-size: 14px;
+    font-weight: bold;
+}
 
-        label {
-            display: block;
-            margin-bottom: 7px;
-            font-size: 14px;
-            font-weight: bold;
-        }
+input[type="text"],
+input[type="tel"],
+textarea {
+    width: 100%;
+    padding: 11px 12px;
+    background: #ffffff;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 14px;
+}
 
-        input[type="text"],
-        input[type="tel"],
-        textarea {
-            width: 100%;
-            padding: 11px 12px;
-            background: #fff;
-            border: 1px solid #d1d5db;
-            border-radius: 6px;
-            font-family: inherit;
-            font-size: 14px;
-        }
+input:focus,
+textarea:focus {
+    outline: none;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.08);
+}
 
-        input:focus,
-        textarea:focus {
-            outline: none;
-            border-color: #2563eb;
-            box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.08);
-        }
+textarea {
+    min-height: 110px;
+    resize: vertical;
+}
 
-        input[readonly] {
-            background: #f1f5f9;
-            color: #475569;
-            cursor: not-allowed;
-        }
+.help-text {
+    display: block;
+    margin-top: 6px;
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.5;
+}
 
-        textarea {
-            min-height: 110px;
-            resize: vertical;
-        }
+.employer-type-box {
+    padding: 15px;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 8px;
+}
 
-        .help-text {
-            display: block;
-            margin-top: 6px;
-            color: #64748b;
-            font-size: 12px;
-            line-height: 1.5;
-        }
+.employer-type-box strong {
+    display: block;
+    margin-bottom: 5px;
+    color: #1e40af;
+}
 
-        .employer-type-box {
-            padding: 15px;
-            background: #eff6ff;
-            border: 1px solid #bfdbfe;
-            border-radius: 8px;
-        }
+.employer-type-box p {
+    color: #475569;
+    font-size: 13px;
+    line-height: 1.5;
+}
 
-        .employer-type-box strong {
-            display: block;
-            margin-bottom: 5px;
-            color: #1e40af;
-        }
+.btn {
+    display: inline-block;
+    padding: 10px 15px;
+    background: #2563eb;
+    border: none;
+    border-radius: 6px;
+    color: #ffffff;
+    font-size: 14px;
+    text-decoration: none;
+    cursor: pointer;
+}
 
-        .employer-type-box p {
-            color: #475569;
-            font-size: 13px;
-            line-height: 1.5;
-        }
+.btn:hover {
+    background: #1d4ed8;
+}
 
-        .btn {
-            display: inline-block;
-            padding: 10px 15px;
-            background: #2563eb;
-            border: none;
-            border-radius: 6px;
-            color: #fff;
-            font-size: 14px;
-            text-decoration: none;
-            cursor: pointer;
-        }
+.btn:disabled {
+    background: #94a3b8;
+    cursor: not-allowed;
+}
 
-        .btn:hover {
-            background: #1d4ed8;
-        }
+.location-status {
+    margin-top: 15px;
+    padding: 12px 14px;
+    background: #dbeafe;
+    border-radius: 6px;
+    color: #1e40af;
+    font-size: 14px;
+    line-height: 1.5;
+}
 
-        .location-status {
-            margin-top: 15px;
-            padding: 12px 14px;
-            background: #dbeafe;
-            border-radius: 6px;
-            color: #1e40af;
-            font-size: 14px;
-            line-height: 1.5;
-        }
+.location-success {
+    background: #dcfce7 !important;
+    color: #166534 !important;
+}
 
-        .area-south {
-            background: #dcfce7 !important;
-            color: #166534 !important;
-        }
+.location-error {
+    background: #fee2e2 !important;
+    color: #991b1b !important;
+}
 
-        .area-north {
-            background: #dbeafe !important;
-            color: #1e40af !important;
-        }
+.location-searching {
+    background: #fef3c7 !important;
+    color: #92400e !important;
+}
 
-        .area-invalid {
-            background: #fee2e2 !important;
-            color: #991b1b !important;
-        }
+.area-south {
+    background: #dcfce7 !important;
+    color: #166534 !important;
+}
 
-        #map {
-            width: 100%;
-            height: 350px;
-            margin-top: 18px;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-        }
+.area-north {
+    background: #dbeafe !important;
+    color: #1e40af !important;
+}
 
-        .document {
-            padding: 18px 0;
-            border-bottom: 1px solid #eee;
-        }
+.area-invalid {
+    background: #fee2e2 !important;
+    color: #991b1b !important;
+}
 
-        .document:first-of-type {
-            padding-top: 0;
-        }
+.map-wrapper {
+    margin-top: 18px;
+}
 
-        .document:last-of-type {
-            border-bottom: none;
-        }
+#map {
+    width: 100%;
+    height: 350px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    background: #f8fafc;
+}
 
-        .document h3 {
-            margin-bottom: 6px;
-            font-size: 16px;
-        }
+.map-help {
+    margin-top: 8px;
+    color: #64748b;
+    font-size: 12px;
+}
 
-        .document p {
-            margin-bottom: 12px;
-            color: #64748b;
-            font-size: 13px;
-            line-height: 1.6;
-        }
+.document {
+    padding: 18px 0;
+    border-bottom: 1px solid #eeeeee;
+}
 
-        input[type="file"] {
-            width: 100%;
-            padding: 10px;
-            background: #fafafa;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-        }
+.document:first-of-type {
+    padding-top: 0;
+}
 
-        .uploaded {
-            margin-top: 10px;
-            color: #166534;
-            font-size: 13px;
-            font-weight: bold;
-        }
+.document:last-of-type {
+    border-bottom: none;
+}
 
-        .verification-note {
-            margin-top: 20px;
-            padding: 15px;
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            color: #475569;
-            font-size: 13px;
-            line-height: 1.6;
-        }
+.document h3 {
+    margin-bottom: 6px;
+    font-size: 16px;
+}
 
-        .status-item {
-            padding: 15px 0;
-            border-bottom: 1px solid #eee;
-        }
+.document p {
+    margin-bottom: 12px;
+    color: #64748b;
+    font-size: 13px;
+    line-height: 1.6;
+}
 
-        .status-item:last-child {
-            border-bottom: none;
-        }
+input[type="file"] {
+    width: 100%;
+    padding: 10px;
+    background: #fafafa;
+    border: 1px solid #dddddd;
+    border-radius: 6px;
+}
 
-        .status-item-label {
-            margin-bottom: 8px;
-            color: #64748b;
-            font-size: 13px;
-        }
+.uploaded {
+    margin-top: 10px;
+    color: #166534;
+    font-size: 13px;
+    font-weight: bold;
+}
 
-        .status {
-            display: inline-block;
-            padding: 5px 10px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: bold;
-        }
+.verification-note {
+    margin-top: 20px;
+    padding: 15px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    color: #475569;
+    font-size: 13px;
+    line-height: 1.6;
+}
 
-        .pending-status {
-            background: #fef3c7;
-            color: #92400e;
-        }
+.status-item {
+    padding: 15px 0;
+    border-bottom: 1px solid #eeeeee;
+}
 
-        .approved-status {
-            background: #dcfce7;
-            color: #166534;
-        }
+.status-item:last-child {
+    border-bottom: none;
+}
 
-        .rejected-status {
-            background: #fee2e2;
-            color: #991b1b;
-        }
+.status-item-label {
+    margin-bottom: 8px;
+    color: #64748b;
+    font-size: 13px;
+}
 
-        .review-status {
-            background: #dbeafe;
-            color: #1e40af;
-        }
+.status {
+    display: inline-block;
+    padding: 5px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: bold;
+}
 
-        .unverified-status {
-            background: #e5e7eb;
-            color: #4b5563;
-        }
+.pending-status {
+    background: #fef3c7;
+    color: #92400e;
+}
 
-        .admin-note {
-            margin-top: 15px;
-            padding: 14px;
-            background: #fff7ed;
-            border: 1px solid #fed7aa;
-            border-radius: 7px;
-            color: #9a3412;
-            font-size: 13px;
-            line-height: 1.6;
-        }
+.approved-status {
+    background: #dcfce7;
+    color: #166534;
+}
 
-        @media (max-width: 800px) {
+.rejected-status {
+    background: #fee2e2;
+    color: #991b1b;
+}
 
-            .profile-grid,
-            .form-grid {
-                grid-template-columns: 1fr;
-            }
+.review-status {
+    background: #dbeafe;
+    color: #1e40af;
+}
 
-            .form-group.full {
-                grid-column: auto;
-            }
+.unverified-status {
+    background: #e5e7eb;
+    color: #4b5563;
+}
 
-        }
+.admin-note {
+    margin-top: 15px;
+    padding: 14px;
+    background: #fff7ed;
+    border: 1px solid #fed7aa;
+    border-radius: 7px;
+    color: #9a3412;
+    font-size: 13px;
+    line-height: 1.6;
+}
 
-        @media (max-width: 600px) {
+.location-buttons {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
 
-            .container {
-                margin: 25px auto;
-                padding: 0 15px;
-            }
+@media (max-width: 800px) {
+    .profile-grid,
+    .form-grid {
+        grid-template-columns: 1fr;
+    }
 
-            .card {
-                padding: 20px;
-            }
+    .form-group.full {
+        grid-column: auto;
+    }
+}
 
-            #map {
-                height: 280px;
-            }
+@media (max-width: 600px) {
+    .container {
+        margin: 25px auto;
+        padding: 0 15px;
+    }
 
-        }
+    .card {
+        padding: 20px;
+    }
 
-    </style>
+    #map {
+        height: 280px;
+    }
+}
+</style>
 
 </head>
 
@@ -1069,6 +1138,7 @@ $adminNotes =
     <form
         method="POST"
         enctype="multipart/form-data"
+        id="employerProfileForm"
     >
 
         <div class="profile-grid">
@@ -1079,7 +1149,7 @@ $adminNotes =
             <div>
 
 
-                <!-- COMPANY / ORGANIZATION -->
+                <!-- COMPANY INFORMATION -->
 
                 <div class="card">
 
@@ -1094,9 +1164,6 @@ $adminNotes =
 
 
                     <div class="form-grid">
-
-
-                        <!-- EMPLOYER TYPE -->
 
                         <div class="form-group full">
 
@@ -1123,8 +1190,6 @@ $adminNotes =
                         </div>
 
 
-                        <!-- COMPANY NAME -->
-
                         <div class="form-group">
 
                             <label for="company_name">
@@ -1144,8 +1209,6 @@ $adminNotes =
 
                         </div>
 
-
-                        <!-- CONTACT PERSON -->
 
                         <div class="form-group">
 
@@ -1167,8 +1230,6 @@ $adminNotes =
                         </div>
 
 
-                        <!-- CONTACT NUMBER -->
-
                         <div class="form-group">
 
                             <label for="contact_number">
@@ -1188,8 +1249,6 @@ $adminNotes =
 
                         </div>
 
-
-                        <!-- DESCRIPTION -->
 
                         <div class="form-group full">
 
@@ -1222,8 +1281,9 @@ $adminNotes =
                     </h2>
 
                     <p class="card-description">
-                        Set the exact location of your company
-                        or organization in Caloocan City.
+                        Enter the business address and barangay.
+                        The system will find the address on
+                        OpenStreetMap and save its coordinates.
                     </p>
 
 
@@ -1237,11 +1297,16 @@ $adminNotes =
                             name="address"
                             id="address"
                             required
-                            placeholder="Building No., Street, Barangay, Caloocan City"
+                            placeholder="Example: 123 Zabarte Road, Camarin, Caloocan City"
                         ><?= htmlspecialchars(
                             $employer["address"]
                             ?? ""
                         ) ?></textarea>
+
+                        <small class="help-text">
+                            Enter the building or house number,
+                            street, subdivision or area name.
+                        </small>
 
                     </div>
 
@@ -1261,7 +1326,6 @@ $adminNotes =
                                 $employer["barangay"]
                                 ?? ""
                             ) ?>"
-                            oninput="detectCaloocanArea()"
                             required
                         >
 
@@ -1274,21 +1338,25 @@ $adminNotes =
                     </div>
 
 
-                    <button
-                        type="button"
-                        class="btn"
-                        onclick="getCurrentLocation()"
-                    >
-                        Use My Current Location
-                    </button>
+                    <div class="location-buttons">
+
+                        <button
+                            type="button"
+                            class="btn"
+                            id="findAddressButton"
+                        >
+                            Locate Address on Map
+                        </button>
+
+                    </div>
 
 
                     <div
                         id="locationStatus"
                         class="location-status"
                     >
-                        Click "Use My Current Location"
-                        to detect your current location.
+                        Enter your complete address and barangay,
+                        then click "Locate Address on Map".
                     </div>
 
 
@@ -1313,11 +1381,21 @@ $adminNotes =
                     >
 
 
-                    <iframe
-                        id="map"
-                        loading="lazy"
-                        allowfullscreen
-                    ></iframe>
+                    <div class="map-wrapper">
+
+                        <iframe
+                            id="map"
+                            loading="lazy"
+                            allowfullscreen
+                        ></iframe>
+
+                        <div class="map-help">
+                            The marker should represent the business
+                            or organization location. The administrator
+                            will still review the submitted location.
+                        </div>
+
+                    </div>
 
                 </div>
 
@@ -1334,9 +1412,9 @@ $adminNotes =
 
                         <?php if ($employerType === "lgu"): ?>
 
-                            Submit documents that allow the administrator
-                            to verify your LGU employer account and
-                            Caloocan location.
+                            Submit documents that allow the
+                            administrator to verify your LGU
+                            employer account and Caloocan location.
 
                         <?php else: ?>
 
@@ -1347,8 +1425,6 @@ $adminNotes =
 
                     </p>
 
-
-                    <!-- GOVERNMENT ID -->
 
                     <div class="document">
 
@@ -1383,8 +1459,6 @@ $adminNotes =
                     </div>
 
 
-                    <!-- BARANGAY CERTIFICATE -->
-
                     <div class="document">
 
                         <h3>
@@ -1405,7 +1479,9 @@ $adminNotes =
 
                         <?php if (
                             !empty(
-                                $verification["barangay_certificate"]
+                                $verification[
+                                    "barangay_certificate"
+                                ]
                                 ?? ""
                             )
                         ): ?>
@@ -1418,8 +1494,6 @@ $adminNotes =
 
                     </div>
 
-
-                    <!-- BUSINESS PERMIT -->
 
                     <div class="document">
 
@@ -1460,7 +1534,6 @@ $adminNotes =
                             name="business_permit"
                             accept=".jpg,.jpeg,.png,.pdf"
                         >
-
 
                         <?php if (
                             !empty(
@@ -1510,7 +1583,7 @@ $adminNotes =
             <div>
 
 
-                <!-- EMPLOYER ACCOUNT TYPE -->
+                <!-- EMPLOYER ACCOUNT -->
 
                 <div class="card">
 
@@ -1540,12 +1613,10 @@ $adminNotes =
                         </div>
 
                         <strong>
-
                             <?= $employerType === "lgu"
                                 ? "LGU"
                                 : "Private Employer"
                             ?>
-
                         </strong>
 
                     </div>
@@ -1593,7 +1664,9 @@ $adminNotes =
 
                                 <?= strtoupper(
                                     htmlspecialchars(
-                                        $employer["caloocan_area"]
+                                        $employer[
+                                            "caloocan_area"
+                                        ]
                                     )
                                 ) ?>
                                 CALOOCAN
@@ -1729,7 +1802,7 @@ $adminNotes =
                 </div>
 
 
-                <!-- VERIFICATION REQUIREMENTS -->
+                <!-- VERIFICATION PROCESS -->
 
                 <div class="card">
 
@@ -1745,8 +1818,7 @@ $adminNotes =
 
                         <br>
 
-                        Government ID and
-                        Barangay Certificate.
+                        Government ID and Barangay Certificate.
 
                         <?php if ($employerType === "private"): ?>
 
@@ -1765,9 +1837,8 @@ $adminNotes =
 
                         <br>
 
-                        Your company or organization
-                        location must be inside
-                        Caloocan City.
+                        Enter your business address and barangay,
+                        then locate it on the map.
 
 
                         <br><br>
@@ -1779,9 +1850,9 @@ $adminNotes =
 
                         <br>
 
-                        The administrator will verify
-                        whether the account is a
-                        Private Employer or LGU employer.
+                        The administrator will verify whether
+                        the account is a Private Employer or
+                        LGU employer.
 
 
                         <br><br>
@@ -1793,9 +1864,9 @@ $adminNotes =
 
                         <br>
 
-                        Job posting access is enabled
-                        only after the employer account
-                        has been approved.
+                        Job posting access is enabled only
+                        after the employer account has been
+                        approved.
 
                     </div>
 
@@ -1811,14 +1882,14 @@ $adminNotes =
                     </h2>
 
                     <p class="card-description">
-                        Saving your profile submits
-                        the information for administrator
-                        verification.
+                        Saving your profile submits the
+                        information for administrator verification.
                     </p>
 
                     <button
                         type="submit"
                         class="btn"
+                        id="saveProfileButton"
                     >
                         Save & Submit
                     </button>
@@ -1838,7 +1909,7 @@ $adminNotes =
 
 /*
 |--------------------------------------------------------------------------
-| NORTH / SOUTH CALOOCAN DETECTION
+| NORTH / SOUTH CALOOCAN
 |--------------------------------------------------------------------------
 */
 
@@ -1859,32 +1930,30 @@ function detectCaloocanArea() {
     const match =
         value.match(/\d+/);
 
+    result.classList.remove(
+        "area-south",
+        "area-north",
+        "area-invalid"
+    );
+
     if (!match) {
         result.style.display = "none";
         result.innerHTML = "";
-
-        result.classList.remove(
-            "area-south",
-            "area-north",
-            "area-invalid"
-        );
-
         return;
     }
 
     const barangayNumber =
-        parseInt(match[0], 10);
+        parseInt(
+            match[0],
+            10
+        );
 
     if (
         barangayNumber >= 1 &&
         barangayNumber <= 164
     ) {
-        result.style.display = "block";
-
-        result.classList.remove(
-            "area-north",
-            "area-invalid"
-        );
+        result.style.display =
+            "block";
 
         result.classList.add(
             "area-south"
@@ -1900,12 +1969,8 @@ function detectCaloocanArea() {
         barangayNumber >= 165 &&
         barangayNumber <= 188
     ) {
-        result.style.display = "block";
-
-        result.classList.remove(
-            "area-south",
-            "area-invalid"
-        );
+        result.style.display =
+            "block";
 
         result.classList.add(
             "area-north"
@@ -1917,12 +1982,8 @@ function detectCaloocanArea() {
         return;
     }
 
-    result.style.display = "block";
-
-    result.classList.remove(
-        "area-south",
-        "area-north"
-    );
+    result.style.display =
+        "block";
 
     result.classList.add(
         "area-invalid"
@@ -1935,110 +1996,153 @@ function detectCaloocanArea() {
 
 /*
 |--------------------------------------------------------------------------
-| CURRENT LOCATION
+| LOCATION STATUS
 |--------------------------------------------------------------------------
 */
 
-function getCurrentLocation() {
+function setLocationStatus(
+    message,
+    type = "normal"
+) {
     const status =
         document.getElementById(
             "locationStatus"
         );
 
-    if (!navigator.geolocation) {
-        status.innerHTML =
-            "Geolocation is not supported by your browser.";
-
+    if (!status) {
         return;
     }
 
-    status.innerHTML =
-        "Getting your current location...";
-
-    navigator.geolocation.getCurrentPosition(
-        function (position) {
-            const latitude =
-                position.coords.latitude;
-
-            const longitude =
-                position.coords.longitude;
-
-            document.getElementById(
-                "latitude"
-            ).value = latitude;
-
-            document.getElementById(
-                "longitude"
-            ).value = longitude;
-
-            status.innerHTML =
-                "Current location detected successfully.";
-
-            showMap(
-                latitude,
-                longitude
-            );
-        },
-
-        function (error) {
-            switch (error.code) {
-                case error.PERMISSION_DENIED:
-                    status.innerHTML =
-                        "Location permission was denied. Please allow location access.";
-                    break;
-
-                case error.POSITION_UNAVAILABLE:
-                    status.innerHTML =
-                        "Your current location is unavailable.";
-                    break;
-
-                case error.TIMEOUT:
-                    status.innerHTML =
-                        "Location request timed out. Please try again.";
-                    break;
-
-                default:
-                    status.innerHTML =
-                        "Unable to get your current location.";
-            }
-        },
-
-        {
-            enableHighAccuracy: true,
-            timeout: 15000,
-            maximumAge: 0
-        }
+    status.classList.remove(
+        "location-success",
+        "location-error",
+        "location-searching"
     );
+
+    if (type === "success") {
+        status.classList.add(
+            "location-success"
+        );
+    }
+
+    if (type === "error") {
+        status.classList.add(
+            "location-error"
+        );
+    }
+
+    if (type === "searching") {
+        status.classList.add(
+            "location-searching"
+        );
+    }
+
+    status.innerHTML =
+        message;
 }
 
 
 /*
 |--------------------------------------------------------------------------
-| MAP
+| ESCAPE HTML
 |--------------------------------------------------------------------------
 */
 
-function showMap(latitude, longitude) {
+function escapeHtml(value) {
+    const element =
+        document.createElement("div");
+
+    element.textContent =
+        value;
+
+    return element.innerHTML;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| CLEAR MAP LOCATION
+|--------------------------------------------------------------------------
+*/
+
+function clearMapLocation() {
+    const latitude =
+        document.getElementById(
+            "latitude"
+        );
+
+    const longitude =
+        document.getElementById(
+            "longitude"
+        );
+
     const map =
-        document.getElementById("map");
+        document.getElementById(
+            "map"
+        );
+
+    if (latitude) {
+        latitude.value = "";
+    }
+
+    if (longitude) {
+        longitude.value = "";
+    }
+
+    if (map) {
+        map.removeAttribute(
+            "src"
+        );
+    }
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| SHOW OPENSTREETMAP
+|--------------------------------------------------------------------------
+*/
+
+function showMap(
+    latitude,
+    longitude
+) {
+    const map =
+        document.getElementById(
+            "map"
+        );
 
     if (!map) {
         return;
     }
 
-    const delta = 0.008;
+    const lat =
+        parseFloat(latitude);
+
+    const lng =
+        parseFloat(longitude);
+
+    if (
+        !Number.isFinite(lat) ||
+        !Number.isFinite(lng)
+    ) {
+        return;
+    }
+
+    const delta =
+        0.006;
 
     const minLongitude =
-        parseFloat(longitude) - delta;
+        lng - delta;
 
     const minLatitude =
-        parseFloat(latitude) - delta;
+        lat - delta;
 
     const maxLongitude =
-        parseFloat(longitude) + delta;
+        lng + delta;
 
     const maxLatitude =
-        parseFloat(latitude) + delta;
+        lat + delta;
 
     const bbox = [
         minLongitude,
@@ -2050,12 +2154,494 @@ function showMap(latitude, longitude) {
     map.src =
         "https://www.openstreetmap.org/export/embed.html"
         + "?bbox="
-        + encodeURIComponent(bbox)
+        + encodeURIComponent(
+            bbox
+        )
         + "&layer=mapnik"
         + "&marker="
-        + encodeURIComponent(latitude)
+        + encodeURIComponent(
+            lat
+        )
         + "%2C"
-        + encodeURIComponent(longitude);
+        + encodeURIComponent(
+            lng
+        );
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| BUILD ADDRESS SEARCH
+|--------------------------------------------------------------------------
+*/
+
+function buildAddressQueries(
+    address,
+    barangay
+) {
+    /*
+    | We try a more specific query first,
+    | then slightly simpler versions if needed.
+    */
+
+    return [
+        address
+            + ", "
+            + barangay
+            + ", Caloocan City, Metro Manila, Philippines",
+
+        address
+            + ", "
+            + barangay
+            + ", Caloocan, Philippines",
+
+        barangay
+            + ", Caloocan City, Metro Manila, Philippines"
+    ];
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| SEARCH ONE ADDRESS
+|--------------------------------------------------------------------------
+*/
+
+async function searchAddress(
+    query
+) {
+    const url =
+        "https://nominatim.openstreetmap.org/search"
+        + "?format=jsonv2"
+        + "&addressdetails=1"
+        + "&limit=5"
+        + "&countrycodes=ph"
+        + "&q="
+        + encodeURIComponent(
+            query
+        );
+
+    const response =
+        await fetch(
+            url,
+            {
+                headers: {
+                    "Accept":
+                        "application/json"
+                }
+            }
+        );
+
+    if (!response.ok) {
+        throw new Error(
+            "Unable to connect to the map service."
+        );
+    }
+
+    const data =
+        await response.json();
+
+    if (!Array.isArray(data)) {
+        return [];
+    }
+
+    return data;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| CHECK APPROXIMATE CALOOCAN AREA
+|--------------------------------------------------------------------------
+*/
+
+function isAroundCaloocan(
+    latitude,
+    longitude
+) {
+    return (
+        latitude >= 14.60 &&
+        latitude <= 14.83 &&
+        longitude >= 120.94 &&
+        longitude <= 121.11
+    );
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| LOCATE ADDRESS
+|--------------------------------------------------------------------------
+*/
+
+async function locateAddressOnMap() {
+    const addressInput =
+        document.getElementById(
+            "address"
+        );
+
+    const barangayInput =
+        document.getElementById(
+            "barangay"
+        );
+
+    const latitudeInput =
+        document.getElementById(
+            "latitude"
+        );
+
+    const longitudeInput =
+        document.getElementById(
+            "longitude"
+        );
+
+    const button =
+        document.getElementById(
+            "findAddressButton"
+        );
+
+    if (
+        !addressInput ||
+        !barangayInput ||
+        !latitudeInput ||
+        !longitudeInput
+    ) {
+        return false;
+    }
+
+    const address =
+        addressInput.value.trim();
+
+    const barangay =
+        barangayInput.value.trim();
+
+    if (address === "") {
+        setLocationStatus(
+            "Please enter the complete address first.",
+            "error"
+        );
+
+        addressInput.focus();
+
+        return false;
+    }
+
+    if (barangay === "") {
+        setLocationStatus(
+            "Please enter the barangay first.",
+            "error"
+        );
+
+        barangayInput.focus();
+
+        return false;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | CHECK BARANGAY NUMBER
+    |--------------------------------------------------------------------------
+    */
+
+    const barangayMatch =
+        barangay.match(/\d+/);
+
+    if (!barangayMatch) {
+        setLocationStatus(
+            "Please enter a valid Caloocan barangay number.",
+            "error"
+        );
+
+        return false;
+    }
+
+    const barangayNumber =
+        parseInt(
+            barangayMatch[0],
+            10
+        );
+
+    if (
+        barangayNumber < 1 ||
+        barangayNumber > 188
+    ) {
+        setLocationStatus(
+            "Barangay must be between 1 and 188.",
+            "error"
+        );
+
+        return false;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | START SEARCH
+    |--------------------------------------------------------------------------
+    */
+
+    button.disabled =
+        true;
+
+    button.textContent =
+        "Locating...";
+
+    setLocationStatus(
+        "Searching the address on OpenStreetMap...",
+        "searching"
+    );
+
+    try {
+        const queries =
+            buildAddressQueries(
+                address,
+                barangay
+            );
+
+        let chosenResult =
+            null;
+
+        for (
+            const query
+            of
+            queries
+        ) {
+            const results =
+                await searchAddress(
+                    query
+                );
+
+            if (!results.length) {
+                continue;
+            }
+
+            /*
+            | Prefer results that are geographically
+            | around Caloocan City.
+            */
+
+            chosenResult =
+                results.find(
+                    function (result) {
+                        const lat =
+                            parseFloat(
+                                result.lat
+                            );
+
+                        const lng =
+                            parseFloat(
+                                result.lon
+                            );
+
+                        return (
+                            Number.isFinite(lat) &&
+                            Number.isFinite(lng) &&
+                            isAroundCaloocan(
+                                lat,
+                                lng
+                            )
+                        );
+                    }
+                )
+                ?? null;
+
+            if (chosenResult) {
+                break;
+            }
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | NOT FOUND
+        |--------------------------------------------------------------------------
+        */
+
+        if (!chosenResult) {
+            clearMapLocation();
+
+            setLocationStatus(
+                "Address not found in Caloocan City. Please make the address more specific and try again.",
+                "error"
+            );
+
+            return false;
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | COORDINATES
+        |--------------------------------------------------------------------------
+        */
+
+        const latitude =
+            parseFloat(
+                chosenResult.lat
+            );
+
+        const longitude =
+            parseFloat(
+                chosenResult.lon
+            );
+
+        if (
+            !Number.isFinite(
+                latitude
+            ) ||
+            !Number.isFinite(
+                longitude
+            )
+        ) {
+            throw new Error(
+                "The map service returned invalid coordinates."
+            );
+        }
+
+        if (
+            !isAroundCaloocan(
+                latitude,
+                longitude
+            )
+        ) {
+            clearMapLocation();
+
+            setLocationStatus(
+                "The detected location is outside Caloocan City.",
+                "error"
+            );
+
+            return false;
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | SAVE HIDDEN VALUES
+        |--------------------------------------------------------------------------
+        */
+
+        latitudeInput.value =
+            latitude.toFixed(8);
+
+        longitudeInput.value =
+            longitude.toFixed(8);
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | MAP
+        |--------------------------------------------------------------------------
+        */
+
+        showMap(
+            latitude,
+            longitude
+        );
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | DISPLAY RESULT
+        |--------------------------------------------------------------------------
+        */
+
+        const displayName =
+            chosenResult.display_name
+            || (
+                address
+                + ", "
+                + barangay
+                + ", Caloocan City"
+            );
+
+        setLocationStatus(
+            "<strong>Location found.</strong><br>"
+            + escapeHtml(
+                displayName
+            ),
+            "success"
+        );
+
+        return true;
+
+    } catch (error) {
+        console.error(
+            error
+        );
+
+        clearMapLocation();
+
+        setLocationStatus(
+            "Unable to locate the address right now. Please check your internet connection and try again.",
+            "error"
+        );
+
+        return false;
+
+    } finally {
+        button.disabled =
+            false;
+
+        button.textContent =
+            "Locate Address on Map";
+    }
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| ADDRESS / BARANGAY CHANGED
+|--------------------------------------------------------------------------
+*/
+
+function invalidateSavedLocation() {
+    const latitude =
+        document.getElementById(
+            "latitude"
+        );
+
+    const longitude =
+        document.getElementById(
+            "longitude"
+        );
+
+    const map =
+        document.getElementById(
+            "map"
+        );
+
+    if (
+        !latitude ||
+        !longitude
+    ) {
+        return;
+    }
+
+    /*
+    | Only clear when a saved map coordinate
+    | currently exists.
+    */
+
+    if (
+        latitude.value !== "" ||
+        longitude.value !== ""
+    ) {
+        latitude.value = "";
+        longitude.value = "";
+
+        if (map) {
+            map.removeAttribute(
+                "src"
+            );
+        }
+
+        setLocationStatus(
+            "Address changed. Click \"Locate Address on Map\" to update the location.",
+            "normal"
+        );
+    }
 }
 
 
@@ -2068,31 +2654,185 @@ function showMap(latitude, longitude) {
 document.addEventListener(
     "DOMContentLoaded",
     function () {
-        detectCaloocanArea();
-
-        const savedLatitude =
+        const address =
             document.getElementById(
-                "latitude"
-            ).value;
-
-        const savedLongitude =
-            document.getElementById(
-                "longitude"
-            ).value;
-
-        if (
-            savedLatitude !== "" &&
-            savedLongitude !== ""
-        ) {
-            showMap(
-                savedLatitude,
-                savedLongitude
+                "address"
             );
 
+        const barangay =
             document.getElementById(
-                "locationStatus"
-            ).innerHTML =
-                "Saved business / organization location loaded.";
+                "barangay"
+            );
+
+        const button =
+            document.getElementById(
+                "findAddressButton"
+            );
+
+        const latitude =
+            document.getElementById(
+                "latitude"
+            );
+
+        const longitude =
+            document.getElementById(
+                "longitude"
+            );
+
+        const form =
+            document.getElementById(
+                "employerProfileForm"
+            );
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | INITIAL BARANGAY AREA
+        |--------------------------------------------------------------------------
+        */
+
+        detectCaloocanArea();
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | LOAD SAVED MAP
+        |--------------------------------------------------------------------------
+        */
+
+        if (
+            latitude &&
+            longitude &&
+            latitude.value !== "" &&
+            longitude.value !== ""
+        ) {
+            showMap(
+                latitude.value,
+                longitude.value
+            );
+
+            setLocationStatus(
+                "Saved business / organization location loaded.",
+                "success"
+            );
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | LOCATE BUTTON
+        |--------------------------------------------------------------------------
+        */
+
+        if (button) {
+            button.addEventListener(
+                "click",
+                locateAddressOnMap
+            );
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | ADDRESS CHANGE
+        |--------------------------------------------------------------------------
+        */
+
+        if (address) {
+            address.addEventListener(
+                "input",
+                invalidateSavedLocation
+            );
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | BARANGAY CHANGE
+        |--------------------------------------------------------------------------
+        */
+
+        if (barangay) {
+            barangay.addEventListener(
+                "input",
+                function () {
+                    detectCaloocanArea();
+                    invalidateSavedLocation();
+                }
+            );
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | ENTER ADDRESS -> AUTO LOCATE AFTER LEAVING FIELD
+        |--------------------------------------------------------------------------
+        */
+
+        if (address) {
+            address.addEventListener(
+                "change",
+                function () {
+                    if (
+                        address.value.trim() !== "" &&
+                        barangay &&
+                        barangay.value.trim() !== ""
+                    ) {
+                        locateAddressOnMap();
+                    }
+                }
+            );
+        }
+
+
+        if (barangay) {
+            barangay.addEventListener(
+                "change",
+                function () {
+                    if (
+                        barangay.value.trim() !== "" &&
+                        address &&
+                        address.value.trim() !== ""
+                    ) {
+                        locateAddressOnMap();
+                    }
+                }
+            );
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | PREVENT SUBMIT WITHOUT MAP LOCATION
+        |--------------------------------------------------------------------------
+        */
+
+        if (form) {
+            form.addEventListener(
+                "submit",
+                function (event) {
+                    if (
+                        !latitude ||
+                        !longitude ||
+                        latitude.value === "" ||
+                        longitude.value === ""
+                    ) {
+                        event.preventDefault();
+
+                        setLocationStatus(
+                            "Please locate the business address on the map before saving.",
+                            "error"
+                        );
+
+                        if (button) {
+                            button.scrollIntoView({
+                                behavior: "smooth",
+                                block: "center"
+                            });
+                        }
+                    }
+                }
+            );
         }
     }
 );
