@@ -3,7 +3,7 @@
 session_start();
 
 require_once "../config/database.php";
-require_once "../services/NotificationService.php";
+require_once "../utilities/NotificationService.php";
 
 /*
 |--------------------------------------------------------------------------
