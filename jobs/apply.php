@@ -1,3 +1,4 @@
+
 <?php
 
 session_start();
@@ -5,7 +6,7 @@ session_start();
 require_once "../config/database.php";
 require_once "../services/ResumeMatcher.php";
 require_once "../services/LocationMatcher.php";
-require_once "../services/NotificationService.php";
+require_once "../utilities/NotificationService.php";
 require_once "../services/QualificationMatcher.php";
 require_once "../services/SkillGapService.php";
 
@@ -19,7 +20,10 @@ if (
 
 $userId = (int) $_SESSION["user_id"];
 $jobId = isset($_GET["id"]) ? (int) $_GET["id"] : 0;
+
 $error = "";
+$eligibilityError = "";
+$eligibilityReasons = [];
 
 if ($jobId <= 0) {
     die("Invalid job.");
@@ -52,8 +56,10 @@ if (!$applicant) {
 }
 
 $applicantId = (int) $applicant["id"];
+
 $applicantName = trim(
-    ($applicant["first_name"] ?? "") . " " . ($applicant["last_name"] ?? "")
+    ($applicant["first_name"] ?? "") . " " .
+    ($applicant["last_name"] ?? "")
 );
 
 
@@ -114,11 +120,41 @@ if (!$job) {
 
 /*
 |--------------------------------------------------------------------------
+| PARSE EMPLOYER REQUIRED SKILLS
+|--------------------------------------------------------------------------
+|
+| Employer skills are stored in jobs.required_skills
+| as comma-separated values.
+|
+*/
+
+$requiredSkillList = [];
+
+$rawRequiredSkills = trim($job["required_skills"] ?? "");
+
+if ($rawRequiredSkills !== "") {
+
+    $requiredSkillList = array_filter(
+        array_map("trim", explode(",", $rawRequiredSkills)),
+        function ($skill) {
+            return $skill !== "";
+        }
+    );
+
+    $requiredSkillList = array_values(
+        array_unique($requiredSkillList)
+    );
+}
+
+
+/*
+|--------------------------------------------------------------------------
 | APPLICATION DEADLINE
 |--------------------------------------------------------------------------
 */
 
 if (!empty($job["application_deadline"])) {
+
     $deadline = strtotime($job["application_deadline"]);
     $today = strtotime(date("Y-m-d"));
 
@@ -150,10 +186,12 @@ $stmt->execute([
 $existingApplication = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if ($existingApplication) {
+
     header(
         "Location: ../applicant/application.php?id=" .
         (int) $existingApplication["id"]
     );
+
     exit;
 }
 
@@ -213,6 +251,134 @@ $tesdaQualifications = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 /*
 |--------------------------------------------------------------------------
+| CHECK EDUCATION AND TESDA ELIGIBILITY
+|--------------------------------------------------------------------------
+*/
+
+$qualificationResult = QualificationMatcher::calculate(
+    $job,
+    $education,
+    $tesdaQualifications
+);
+
+$educationScore = max(
+    0,
+    min(
+        100,
+        (float) ($qualificationResult["education_score"] ?? 0)
+    )
+);
+
+$tesdaScore = max(
+    0,
+    min(
+        100,
+        (float) ($qualificationResult["tesda_score"] ?? 0)
+    )
+);
+
+$matchedQualifications =
+    $qualificationResult["matched_qualifications"] ?? [];
+
+$missingQualifications =
+    $qualificationResult["missing_qualifications"] ?? [];
+
+$qualificationExplanation = trim(
+    $qualificationResult["explanation"] ?? ""
+);
+
+
+/*
+|--------------------------------------------------------------------------
+| DETERMINE ACTUAL REQUIREMENTS
+|--------------------------------------------------------------------------
+*/
+
+$requiredEducation = trim(
+    $job["educational_requirement"] ?? ""
+);
+
+$requiredDegree = trim(
+    $job["required_degree"] ?? ""
+);
+
+$requiredTesda = trim(
+    $job["tesda_qualification"] ?? ""
+);
+
+$requiredNcLevel = trim(
+    $job["required_nc_level"] ?? ""
+);
+
+$hasEducationLevelRequirement = (
+    $requiredEducation !== "" &&
+    strtolower($requiredEducation) !== "no formal requirement"
+);
+
+$hasDegreeRequirement = (
+    $requiredDegree !== ""
+);
+
+$hasEducationRequirement = (
+    $hasEducationLevelRequirement ||
+    $hasDegreeRequirement
+);
+
+$hasTesdaQualificationRequirement = (
+    $requiredTesda !== ""
+);
+
+$hasNcRequirement = (
+    $requiredNcLevel !== "" &&
+    strtolower($requiredNcLevel) !== "no nc required"
+);
+
+$hasTesdaRequirement = (
+    $hasTesdaQualificationRequirement ||
+    $hasNcRequirement
+);
+
+
+/*
+|--------------------------------------------------------------------------
+| FINAL ELIGIBILITY
+|--------------------------------------------------------------------------
+*/
+
+$isEligible = true;
+
+if (
+    $hasEducationRequirement &&
+    $educationScore < 100
+) {
+    $isEligible = false;
+}
+
+if (
+    $hasTesdaRequirement &&
+    $tesdaScore < 100
+) {
+    $isEligible = false;
+}
+
+if (!$isEligible) {
+
+    $eligibilityReasons = $missingQualifications;
+
+    if (empty($eligibilityReasons)) {
+
+        $eligibilityReasons[] =
+            "Your saved education or TESDA qualifications do not meet the job requirements.";
+
+    }
+
+    $eligibilityError =
+        "You are not eligible to apply for this job because your saved qualifications do not meet the employer's requirements.";
+}
+
+
+/*
+|--------------------------------------------------------------------------
 | GET RESUMES
 |--------------------------------------------------------------------------
 */
@@ -242,15 +408,64 @@ $resumes = $stmt->fetchAll(PDO::FETCH_ASSOC);
 */
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
+
+    /*
+     * Do not allow an unqualified applicant to submit.
+     */
+    if (!$isEligible) {
+        $error = $eligibilityError;
+    }
+
     $resumeId = isset($_POST["resume_id"])
         ? (int) $_POST["resume_id"]
         : 0;
 
     $coverLetter = trim($_POST["cover_letter"] ?? "");
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | GET APPLICANT SELECTED SKILLS
+    |--------------------------------------------------------------------------
+    |
+    | Only accept skills that actually exist in the employer's
+    | required skills list.
+    |
+    */
+
+    $submittedSkills = $_POST["selected_skills"] ?? [];
+
+    if (!is_array($submittedSkills)) {
+        $submittedSkills = [];
+    }
+
+    $selectedSkills = [];
+
+    foreach ($submittedSkills as $skill) {
+
+        if (!is_string($skill)) {
+            continue;
+        }
+
+        $skill = trim($skill);
+
+        if (
+            $skill !== "" &&
+            in_array($skill, $requiredSkillList, true)
+        ) {
+            $selectedSkills[] = $skill;
+        }
+    }
+
+    $selectedSkills = array_values(
+        array_unique($selectedSkills)
+    );
+
+
     $resume = null;
     $resumeText = "";
 
-    if ($resumeId <= 0) {
+    if ($error === "" && $resumeId <= 0) {
         $error = "Please select a resume.";
     }
 
@@ -262,6 +477,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     */
 
     if ($error === "") {
+
         $stmt = $pdo->prepare("
             SELECT
                 id,
@@ -296,12 +512,15 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     */
 
     if ($error === "") {
+
         $resumeText = trim($resume["extracted_text"] ?? "");
 
         if ($resumeText === "") {
+
             $error =
                 "The selected resume does not contain readable text. " .
                 "Please upload a readable PDF resume.";
+
         }
     }
 
@@ -313,10 +532,13 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     */
 
     if ($error === "") {
+
         if (!LocationMatcher::isCaloocan($resumeText)) {
+
             $error =
                 "You cannot apply for this job because your resume " .
                 "does not indicate a Caloocan City address.";
+
         }
     }
 
@@ -328,45 +550,79 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     */
 
     if ($error === "") {
+
         try {
+
             /*
             |--------------------------------------------------------------------------
             | SKILLS
             |--------------------------------------------------------------------------
             */
 
-            $skillRequirements = trim($job["required_skills"] ?? "");
+            $skillRequirements = trim(
+                $job["required_skills"] ?? ""
+            );
 
             /*
              * Compatibility for older jobs.
              * If required_skills is empty, use the old requirements field.
              */
-            if ($skillRequirements === "") {
-                $skillRequirements = trim($job["requirements"] ?? "");
-            }
 
-            if ($skillRequirements !== "") {
-                $skillsResult = ResumeMatcher::calculateSkillsMatch(
-                    $skillRequirements,
-                    $resumeText
+            if ($skillRequirements === "") {
+
+                $skillRequirements = trim(
+                    $job["requirements"] ?? ""
                 );
 
-                $resumeSkills = $skillsResult["resume_skills"] ?? [];
+            }
+
+
+            if ($skillRequirements !== "") {
+
+                /*
+                 * Add applicant-selected skills to the matching text.
+                 * The original resume text is not modified in the database.
+                 */
+
+                $matchingResumeText = $resumeText;
+
+                if (!empty($selectedSkills)) {
+
+                    $matchingResumeText .=
+                        "\n\nSKILLS AND COMPETENCIES\n" .
+                        implode("\n", $selectedSkills);
+
+                }
+
+
+                $skillsResult = ResumeMatcher::calculateSkillsMatch(
+                    $skillRequirements,
+                    $matchingResumeText
+                );
+
+                $resumeSkills =
+                    $skillsResult["resume_skills"] ?? [];
 
                 if (count($resumeSkills) === 0) {
+
                     throw new Exception(
                         'Your resume does not contain a readable "SKILLS AND COMPETENCIES" section. ' .
                         "Please update your resume before applying."
                     );
+
                 }
+
             } else {
+
                 $skillsResult = [
                     "score" => 100,
                     "matched_skills" => [],
                     "missing_skills" => [],
                     "resume_skills" => []
                 ];
+
             }
+
 
             $skillsScore = max(
                 0,
@@ -376,8 +632,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 )
             );
 
-            $matchedSkills = $skillsResult["matched_skills"] ?? [];
-            $missingSkills = $skillsResult["missing_skills"] ?? [];
+            $matchedSkills =
+                $skillsResult["matched_skills"] ?? [];
+
+            $missingSkills =
+                $skillsResult["missing_skills"] ?? [];
 
 
             /*
@@ -385,12 +644,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             | EDUCATION + TESDA / NC
             |--------------------------------------------------------------------------
             */
-
-            $qualificationResult = QualificationMatcher::calculate(
-                $job,
-                $education,
-                $tesdaQualifications
-            );
 
             $educationScore = max(
                 0,
@@ -428,51 +681,56 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             | Education = 25
             | TESDA     = 25
             |
-            | A category is only included if the employer actually specified it.
+            | A category is only included if the employer actually
+            | specified that category.
             |
             */
 
-            $hasSkills = $skillRequirements !== "";
+            $hasSkills = (
+                $skillRequirements !== ""
+            );
 
             $hasEducation =
-                trim($job["educational_requirement"] ?? "") !== "" ||
-                trim($job["required_degree"] ?? "") !== "" ||
-                trim($job["degree_classification"] ?? "") !== "";
-
-            $requiredNcLevel = trim($job["required_nc_level"] ?? "");
+                $hasEducationRequirement;
 
             $hasTesda =
-                trim($job["tesda_qualification"] ?? "") !== "" ||
-                (
-                    $requiredNcLevel !== "" &&
-                    $requiredNcLevel !== "No NC Required"
-                );
+                $hasTesdaRequirement;
 
             $weightedTotal = 0;
             $weightTotal = 0;
 
             if ($hasSkills) {
+
                 $weightedTotal += $skillsScore * 50;
                 $weightTotal += 50;
+
             }
 
             if ($hasEducation) {
+
                 $weightedTotal += $educationScore * 25;
                 $weightTotal += 25;
+
             }
 
             if ($hasTesda) {
+
                 $weightedTotal += $tesdaScore * 25;
                 $weightTotal += 25;
+
             }
 
             if ($weightTotal > 0) {
+
                 $overallScore = round(
                     $weightedTotal / $weightTotal,
                     2
                 );
+
             } else {
+
                 $overallScore = 0;
+
             }
 
 
@@ -550,6 +808,36 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
             /*
             |--------------------------------------------------------------------------
+            | SAVE APPLICANT SELECTED SKILLS
+            |--------------------------------------------------------------------------
+            |
+            | Stored separately from jobs.required_skills.
+            |
+            */
+
+            if (!empty($selectedSkills)) {
+
+                $skillInsert = $pdo->prepare("
+                    INSERT INTO application_selected_skills (
+                        application_id,
+                        skill_name
+                    )
+                    VALUES (?, ?)
+                ");
+
+                foreach ($selectedSkills as $skill) {
+
+                    $skillInsert->execute([
+                        $applicationId,
+                        $skill
+                    ]);
+
+                }
+            }
+
+
+            /*
+            |--------------------------------------------------------------------------
             | SAVE MATCH RESULT
             |--------------------------------------------------------------------------
             */
@@ -612,10 +900,14 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             |--------------------------------------------------------------------------
             */
 
-            $employerUserId = (int) ($job["employer_user_id"] ?? 0);
+            $employerUserId = (int) (
+                $job["employer_user_id"] ?? 0
+            );
 
             if ($employerUserId > 0) {
+
                 try {
+
                     NotificationService::create(
                         $pdo,
                         $employerUserId,
@@ -627,29 +919,45 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                         "application",
                         $applicationId
                     );
+
                 } catch (Throwable $notificationError) {
+
                     error_log(
                         "Application notification error: " .
                         $notificationError->getMessage()
                     );
+
                 }
             }
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | REDIRECT
+            |--------------------------------------------------------------------------
+            */
 
             header(
                 "Location: ../applicant/application.php?id=" .
                 $applicationId
             );
+
             exit;
 
         } catch (Throwable $e) {
+
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
 
             if ((string) $e->getCode() === "23000") {
+
                 $error = "You have already applied for this job.";
+
             } else {
+
                 $error = $e->getMessage();
+
             }
         }
     }
@@ -661,7 +969,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 <html lang="en">
 
 <head>
+
     <meta charset="UTF-8">
+
     <meta
         name="viewport"
         content="width=device-width, initial-scale=1.0"
@@ -672,6 +982,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     </title>
 
     <style>
+
         * {
             box-sizing: border-box;
             margin: 0;
@@ -786,12 +1097,29 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             padding: 14px 16px;
             margin-bottom: 20px;
             border-radius: 8px;
+            line-height: 1.6;
         }
 
         .alert-error {
             background: #fee2e2;
             border: 1px solid #fecaca;
             color: #991b1b;
+        }
+
+        .alert-warning {
+            background: #fff7ed;
+            border: 1px solid #fed7aa;
+            color: #9a3412;
+        }
+
+        .alert-success {
+            background: #dcfce7;
+            border: 1px solid #bbf7d0;
+            color: #166534;
+        }
+
+        .alert ul {
+            margin: 10px 0 0 20px;
         }
 
         .form-group {
@@ -849,6 +1177,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             background: #1d4ed8;
         }
 
+        .apply-btn:disabled {
+            background: #94a3b8;
+            cursor: not-allowed;
+        }
+
         .empty-message {
             color: #64748b;
             line-height: 1.6;
@@ -862,7 +1195,56 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             text-decoration: none;
         }
 
+        .profile-link {
+            display: inline-block;
+            margin-top: 12px;
+            color: #2563eb;
+            font-weight: bold;
+            text-decoration: none;
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | APPLICANT SKILL CHECKBOXES
+        |--------------------------------------------------------------------------
+        */
+
+        .applicant-skills-list {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+            margin-top: 12px;
+        }
+
+        .applicant-skill-option {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px;
+            margin: 0;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: normal;
+        }
+
+        .applicant-skill-option input {
+            width: 17px;
+            height: 17px;
+            flex-shrink: 0;
+            cursor: pointer;
+        }
+
+        .applicant-skill-option:has(input:checked) {
+            background: #eff6ff;
+            border-color: #93c5fd;
+        }
+
+
         @media (max-width: 700px) {
+
             .navbar {
                 padding: 15px 20px;
                 flex-direction: column;
@@ -881,27 +1263,49 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             .card {
                 padding: 20px;
             }
+
         }
+
+        @media (max-width: 600px) {
+
+            .applicant-skills-list {
+                grid-template-columns: 1fr;
+            }
+
+        }
+
     </style>
+
 </head>
 
 <body>
 
+
 <nav class="navbar">
+
     <a href="../index.php" class="logo">
         JobPortal
     </a>
 
     <div class="nav-links">
+
         <a href="../index.php">Home</a>
+
         <a href="index.php">Jobs</a>
+
         <a href="../applicant/dashboard.php">Dashboard</a>
+
         <a href="../applicant/applications.php">Applications</a>
+
         <a href="../logout.php">Logout</a>
+
     </div>
+
 </nav>
 
+
 <div class="container">
+
 
     <a
         href="view.php?id=<?= (int) $job["id"] ?>"
@@ -910,14 +1314,20 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         &larr; Back to Job
     </a>
 
+
     <?php if ($error !== ""): ?>
+
         <div class="alert alert-error">
+
             <?= htmlspecialchars($error) ?>
+
         </div>
+
     <?php endif; ?>
 
 
     <div class="card">
+
         <h1>
             <?= htmlspecialchars($job["job_title"]) ?>
         </h1>
@@ -926,7 +1336,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             <?= htmlspecialchars($job["company_name"]) ?>
         </div>
 
+
         <div class="meta">
+
             <span>
                 <?= htmlspecialchars($job["employment_type"]) ?>
             </span>
@@ -949,12 +1361,15 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     )
                 ) ?>
             </span>
+
         </div>
 
 
         <div class="qualification-grid">
 
+
             <div class="qualification-item">
+
                 <span class="qualification-label">
                     Required Skills
                 </span>
@@ -964,10 +1379,12 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                         $job["required_skills"] ?: "Not specified"
                     )
                 ) ?>
+
             </div>
 
 
             <div class="qualification-item">
+
                 <span class="qualification-label">
                     Educational Requirement
                 </span>
@@ -976,10 +1393,12 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     $job["educational_requirement"]
                         ?: "No specific requirement"
                 ) ?>
+
             </div>
 
 
             <div class="qualification-item">
+
                 <span class="qualification-label">
                     Degree / Program
                 </span>
@@ -988,10 +1407,12 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     $job["required_degree"]
                         ?: "No specific degree"
                 ) ?>
+
             </div>
 
 
             <div class="qualification-item">
+
                 <span class="qualification-label">
                     Degree Classification
                 </span>
@@ -1000,10 +1421,12 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     $job["degree_classification"]
                         ?: "Not specified"
                 ) ?>
+
             </div>
 
 
             <div class="qualification-item">
+
                 <span class="qualification-label">
                     TESDA Qualification
                 </span>
@@ -1012,10 +1435,12 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     $job["tesda_qualification"]
                         ?: "Not required"
                 ) ?>
+
             </div>
 
 
             <div class="qualification-item">
+
                 <span class="qualification-label">
                     Required NC Level
                 </span>
@@ -1024,21 +1449,72 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     $job["required_nc_level"]
                         ?: "No NC Required"
                 ) ?>
+
             </div>
 
+
         </div>
+
     </div>
 
 
+
     <div class="card">
+
         <h2>Submit Application</h2>
 
-        <?php if (empty($resumes)): ?>
+
+        <?php if (!$isEligible): ?>
+
+
+            <div class="alert alert-warning">
+
+                <strong>
+                    You are not eligible for this job.
+                </strong>
+
+                <p>
+                    <?= htmlspecialchars($eligibilityError) ?>
+                </p>
+
+
+                <?php if (!empty($eligibilityReasons)): ?>
+
+                    <ul>
+
+                        <?php foreach ($eligibilityReasons as $reason): ?>
+
+                            <li>
+                                <?= htmlspecialchars($reason) ?>
+                            </li>
+
+                        <?php endforeach; ?>
+
+                    </ul>
+
+                <?php endif; ?>
+
+
+                <a
+                    href="../applicant/profile.php"
+                    class="profile-link"
+                >
+                    Update Your Education / TESDA Profile
+                </a>
+
+            </div>
+
+
+        <?php elseif (empty($resumes)): ?>
+
 
             <p class="empty-message">
+
                 You need to upload a readable PDF resume
                 before applying for this job.
+
             </p>
+
 
             <a
                 href="../applicant/resume.php"
@@ -1047,25 +1523,41 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 Upload Resume
             </a>
 
+
         <?php else: ?>
+
+
+            <div class="alert alert-success">
+
+                Your saved education and TESDA qualifications
+                meet the specified job requirements.
+
+            </div>
+
 
             <form method="POST">
 
+
                 <div class="form-group">
+
                     <label for="resume_id">
                         Select Resume *
                     </label>
+
 
                     <select
                         name="resume_id"
                         id="resume_id"
                         required
                     >
+
                         <option value="">
                             Select a resume
                         </option>
 
+
                         <?php foreach ($resumes as $resumeOption): ?>
+
                             <option
                                 value="<?= (int) $resumeOption["id"] ?>"
                                 <?= (
@@ -1077,30 +1569,115 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                                     : ""
                                 ?>
                             >
+
                                 <?= htmlspecialchars(
                                     $resumeOption["file_name"]
                                 ) ?>
+
                                 -
-                                <?= date(
-                                    "M d, Y",
-                                    strtotime(
-                                        $resumeOption["uploaded_at"]
+
+                                <?= !empty($resumeOption["uploaded_at"])
+                                    ? date(
+                                        "M d, Y",
+                                        strtotime($resumeOption["uploaded_at"])
                                     )
-                                ) ?>
+                                    : ""
+                                ?>
+
                             </option>
+
                         <?php endforeach; ?>
+
+
                     </select>
 
+
                     <small class="help-text">
+
                         Skills are compared using the
                         SKILLS AND COMPETENCIES section of your resume.
                         Education and TESDA matching use the qualifications
                         saved in your applicant account.
+
                     </small>
+
                 </div>
 
 
+
+                <!-- APPLICANT SELECTED SKILLS -->
+
                 <div class="form-group">
+
+                    <label>
+                        Skills You Currently Possess
+                    </label>
+
+                    <p class="help-text">
+
+                        Select the skills you currently have from the
+                        employer's required skills.
+
+                    </p>
+
+
+                    <?php if (!empty($requiredSkillList)): ?>
+
+
+                        <div class="applicant-skills-list">
+
+
+                            <?php foreach ($requiredSkillList as $skill): ?>
+
+                                <label class="applicant-skill-option">
+
+                                    <input
+                                        type="checkbox"
+                                        name="selected_skills[]"
+                                        value="<?= htmlspecialchars($skill) ?>"
+                                        <?= (
+                                            isset($_POST["selected_skills"]) &&
+                                            is_array($_POST["selected_skills"]) &&
+                                            in_array(
+                                                $skill,
+                                                $_POST["selected_skills"],
+                                                true
+                                            )
+                                        ) ? "checked" : "" ?>
+                                    >
+
+                                    <span>
+                                        <?= htmlspecialchars($skill) ?>
+                                    </span>
+
+                                </label>
+
+                            <?php endforeach; ?>
+
+
+                        </div>
+
+
+                    <?php else: ?>
+
+
+                        <p class="empty-message">
+
+                            The employer has not specified individual
+                            required skills.
+
+                        </p>
+
+
+                    <?php endif; ?>
+
+
+                </div>
+
+
+
+                <div class="form-group">
+
                     <label for="cover_letter">
                         Cover Letter
                     </label>
@@ -1112,7 +1689,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     ><?= htmlspecialchars(
                         $_POST["cover_letter"] ?? ""
                     ) ?></textarea>
+
                 </div>
+
 
 
                 <button
@@ -1122,12 +1701,18 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     Submit Application
                 </button>
 
+
             </form>
 
+
         <?php endif; ?>
+
+
     </div>
 
+
 </div>
+
 
 </body>
 </html>

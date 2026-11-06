@@ -1,9 +1,75 @@
+
 <?php
 
 session_start();
 
 require_once "config/database.php";
 
+/*
+|--------------------------------------------------------------------------
+| APPLICANT EDUCATION
+|--------------------------------------------------------------------------
+*/
+
+$isApplicant = (
+    isset($_SESSION["user_id"]) &&
+    ($_SESSION["role"] ?? "") === "applicant"
+);
+
+$applicantEducationRank = 0;
+
+$educationRanks = [
+    "elementary" => 1,
+    "junior high school" => 2,
+    "senior high school" => 3,
+    "vocational" => 4,
+    "college undergraduate" => 5,
+    "college graduate" => 6,
+    "postgraduate" => 7
+];
+
+if ($isApplicant) {
+
+    $stmt = $pdo->prepare("
+        SELECT id
+        FROM applicants
+        WHERE user_id = ?
+        LIMIT 1
+    ");
+
+    $stmt->execute([
+        $_SESSION["user_id"]
+    ]);
+
+    $applicant = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if ($applicant) {
+
+        $stmt = $pdo->prepare("
+            SELECT educational_attainment
+            FROM applicant_education
+            WHERE applicant_id = ?
+            ORDER BY id ASC
+            LIMIT 1
+        ");
+
+        $stmt->execute([
+            (int) $applicant["id"]
+        ]);
+
+        $education = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($education) {
+
+            $attainment = strtolower(
+                trim($education["educational_attainment"] ?? "")
+            );
+
+            $applicantEducationRank =
+                $educationRanks[$attainment] ?? 0;
+        }
+    }
+}
 
 /*
 |--------------------------------------------------------------------------
@@ -11,10 +77,8 @@ require_once "config/database.php";
 |--------------------------------------------------------------------------
 */
 
-$stmt = $pdo->prepare("
-
+$sql = "
     SELECT
-
         j.id,
         j.job_title,
         j.description,
@@ -37,24 +101,84 @@ $stmt = $pdo->prepare("
         ON j.employer_id = e.id
 
     WHERE j.status = 'approved'
+";
 
-    ORDER BY
-        j.created_at DESC
+$params = [];
 
+/*
+|--------------------------------------------------------------------------
+| EDUCATION FILTER FOR APPLICANTS
+|--------------------------------------------------------------------------
+*/
+
+if ($isApplicant) {
+
+    $sql .= "
+        AND (
+            CASE
+                WHEN LOWER(TRIM(
+                    COALESCE(j.educational_requirement, '')
+                )) IN ('', 'no formal requirement')
+                    THEN 0
+
+                WHEN LOWER(TRIM(j.educational_requirement))
+                    = 'elementary'
+                    THEN 1
+
+                WHEN LOWER(TRIM(j.educational_requirement))
+                    = 'junior high school'
+                    THEN 2
+
+                WHEN LOWER(TRIM(j.educational_requirement))
+                    IN (
+                        'senior high school',
+                        'senior high school graduate',
+                        'high school graduate'
+                    )
+                    THEN 3
+
+                WHEN LOWER(TRIM(j.educational_requirement))
+                    = 'vocational'
+                    THEN 4
+
+                WHEN LOWER(TRIM(j.educational_requirement))
+                    = 'college undergraduate'
+                    THEN 5
+
+                WHEN LOWER(TRIM(j.educational_requirement))
+                    = 'college graduate'
+                    THEN 6
+
+                WHEN LOWER(TRIM(j.educational_requirement))
+                    = 'postgraduate'
+                    THEN 7
+
+                ELSE 999
+            END
+        ) <= ?
+    ";
+
+    $params[] = $applicantEducationRank;
+}
+
+/*
+|--------------------------------------------------------------------------
+| LATEST 6 JOBS
+|--------------------------------------------------------------------------
+*/
+
+$sql .= "
+    ORDER BY j.created_at DESC
     LIMIT 6
+";
 
-");
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
 
-
-$stmt->execute();
-
-
-$jobs =
-    $stmt->fetchAll(
-        PDO::FETCH_ASSOC
-    );
+$jobs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 ?>
+
 
 <!DOCTYPE html>
 

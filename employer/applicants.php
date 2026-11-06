@@ -1,9 +1,10 @@
+
 <?php
 
 session_start();
 
 require_once "../config/database.php";
-require_once "../utilities/NotificationService.php";
+// require_once "../services/NotificationService.php";
 
 /*
 |--------------------------------------------------------------------------
@@ -13,7 +14,7 @@ require_once "../utilities/NotificationService.php";
 
 if (
     !isset($_SESSION["user_id"]) ||
-    $_SESSION["role"] !== "employer"
+    ($_SESSION["role"] ?? "") !== "employer"
 ) {
     header("Location: ../login.php");
     exit;
@@ -49,9 +50,7 @@ $perPage = 10;
 */
 
 $stmt = $pdo->prepare("
-    SELECT
-        id,
-        company_name
+    SELECT id, company_name
     FROM employers
     WHERE user_id = ?
     LIMIT 1
@@ -71,16 +70,14 @@ $employerId = (int) $employer["id"];
 |--------------------------------------------------------------------------
 | APPLICATION MATCH COLUMN CHECK
 |--------------------------------------------------------------------------
-|
-| Allows this page to remain usable even before the optional matching
-| migration has been run.
-|
 */
 
 $matchColumns = [];
 
 try {
-    $columnStmt = $pdo->query("SHOW COLUMNS FROM application_matches");
+    $columnStmt = $pdo->query(
+        "SHOW COLUMNS FROM application_matches"
+    );
 
     foreach ($columnStmt->fetchAll(PDO::FETCH_ASSOC) as $column) {
         $matchColumns[] = $column["Field"];
@@ -144,12 +141,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         try {
 
-            /*
-            |--------------------------------------------------------------------------
-            | GET APPLICATION OWNER BEFORE UPDATE
-            |--------------------------------------------------------------------------
-            */
-
             $stmt = $pdo->prepare("
                 SELECT
                     a.id,
@@ -182,12 +173,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
             $oldStatus = $applicationOwner["current_status"];
 
-            /*
-            |--------------------------------------------------------------------------
-            | UPDATE
-            |--------------------------------------------------------------------------
-            */
-
             $stmt = $pdo->prepare("
                 UPDATE applications
                 SET status = ?
@@ -203,7 +188,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
             /*
             |--------------------------------------------------------------------------
-            | NOTIFY APPLICANT ONLY WHEN STATUS REALLY CHANGED
+            | NOTIFY APPLICANT ONLY WHEN STATUS CHANGES
             |--------------------------------------------------------------------------
             */
 
@@ -212,6 +197,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $statusLabel = ucfirst($status);
 
                 try {
+
                     NotificationService::create(
                         $pdo,
                         (int) $applicationOwner["applicant_user_id"],
@@ -224,7 +210,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                         "application_status",
                         $applicationId
                     );
+
                 } catch (Throwable $notificationError) {
+
                     error_log(
                         "Applicant notification error: "
                         . $notificationError->getMessage()
@@ -245,9 +233,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 */
 
 $stmt = $pdo->prepare("
-    SELECT
-        id,
-        job_title
+    SELECT id, job_title
     FROM jobs
     WHERE employer_id = ?
     ORDER BY created_at DESC
@@ -299,7 +285,7 @@ $whereSql = implode(" AND ", $conditions);
 
 /*
 |--------------------------------------------------------------------------
-| COUNT
+| COUNT APPLICANTS
 |--------------------------------------------------------------------------
 */
 
@@ -360,13 +346,26 @@ $sql = "
         am.skills_score,
         am.experience_score,
         am.education_score,
+
         $tesdaScoreSelect,
+
         am.matched_skills,
         am.missing_skills,
+
         $qualificationExplanationSelect,
         $matchedQualificationsSelect,
         $missingQualificationsSelect,
-        $skillGapFeedbackSelect
+        $skillGapFeedbackSelect,
+
+        (
+            SELECT GROUP_CONCAT(
+                ass.skill_name
+                ORDER BY ass.id ASC
+                SEPARATOR ', '
+            )
+            FROM application_selected_skills ass
+            WHERE ass.application_id = a.id
+        ) AS applicant_selected_skills
 
     FROM applications a
 
@@ -465,14 +464,9 @@ function clampScore($score): float
 
 <meta charset="UTF-8">
 
-<meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0"
->
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<title>
-    Applicants - Caloocan Job Portal
-</title>
+<title>Applicants - Caloocan Job Portal</title>
 
 <style>
 
@@ -527,10 +521,7 @@ body {
     padding: 20px;
     border-radius: 10px;
     margin-bottom: 20px;
-
-    box-shadow:
-        0 2px 10px
-        rgba(0,0,0,0.05);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
 }
 
 .filters form {
@@ -581,8 +572,7 @@ body {
 
 .applicant-grid {
     display: grid;
-    grid-template-columns:
-        repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 20px;
 }
 
@@ -590,13 +580,8 @@ body {
     background: white;
     border-radius: 12px;
     padding: 20px;
-
-    box-shadow:
-        0 2px 10px
-        rgba(0,0,0,0.05);
-
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
     border: 1px solid #eee;
-
     display: flex;
     flex-direction: column;
 }
@@ -782,6 +767,43 @@ body {
     color: #222;
 }
 
+.selected-skills-box {
+    margin-top: 12px;
+    padding: 12px;
+    border-radius: 7px;
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+}
+
+.selected-skills-title {
+    font-size: 12px;
+    font-weight: bold;
+    color: #166534;
+    margin-bottom: 8px;
+}
+
+.skill-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.skill-tag {
+    display: inline-block;
+    padding: 5px 9px;
+    border-radius: 20px;
+    background: #dcfce7;
+    color: #166534;
+    border: 1px solid #bbf7d0;
+    font-size: 11px;
+    line-height: 1.3;
+}
+
+.no-skills {
+    font-size: 12px;
+    color: #64748b;
+}
+
 .explanation-box {
     margin-top: 12px;
     padding: 10px;
@@ -837,7 +859,6 @@ body {
     margin-top: auto;
     padding-top: 15px;
     border-top: 1px solid #eee;
-
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -866,10 +887,7 @@ body {
     padding: 60px 30px;
     text-align: center;
     border-radius: 10px;
-
-    box-shadow:
-        0 2px 10px
-        rgba(0,0,0,0.05);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
 }
 
 .pagination-wrapper {
@@ -890,11 +908,9 @@ body {
     min-width: 38px;
     height: 38px;
     padding: 0 12px;
-
     display: flex;
     align-items: center;
     justify-content: center;
-
     border-radius: 6px;
     text-decoration: none;
     border: 1px solid #ddd;
@@ -916,14 +932,12 @@ body {
 }
 
 @media (max-width: 850px) {
-
     .applicant-grid {
         grid-template-columns: 1fr;
     }
 }
 
 @media (max-width: 650px) {
-
     .filters form {
         grid-template-columns: 1fr;
     }
@@ -940,7 +954,6 @@ body {
 }
 
 @media (max-width: 500px) {
-
     .card-header,
     .card-footer {
         flex-direction: column;
@@ -961,39 +974,25 @@ require __DIR__ . "/includes/header.php";
 <div class="container">
 
     <div class="header">
-
-        <h1>
-            Applicants
-        </h1>
+        <h1>Applicants</h1>
 
         <p>
             Review applicants, qualification matching,
             and skill-gap results.
         </p>
-
     </div>
 
     <?php if ($success): ?>
-
         <div class="message success">
-
             <?= htmlspecialchars($success) ?>
-
         </div>
-
     <?php endif; ?>
-
 
     <?php if ($error): ?>
-
         <div class="message error">
-
             <?= htmlspecialchars($error) ?>
-
         </div>
-
     <?php endif; ?>
-
 
     <div class="filters">
 
@@ -1009,9 +1008,7 @@ require __DIR__ . "/includes/header.php";
 
             <select name="job_id">
 
-                <option value="0">
-                    All Jobs
-                </option>
+                <option value="0">All Jobs</option>
 
                 <?php foreach ($jobs as $job): ?>
 
@@ -1029,10 +1026,7 @@ require __DIR__ . "/includes/header.php";
 
             </select>
 
-            <button
-                type="submit"
-                class="filter-btn"
-            >
+            <button type="submit" class="filter-btn">
                 Search / Filter
             </button>
 
@@ -1040,10 +1034,7 @@ require __DIR__ . "/includes/header.php";
 
         <?php if ($search !== "" || $jobId > 0): ?>
 
-            <a
-                href="applicants.php"
-                class="clear-btn"
-            >
+            <a href="applicants.php" class="clear-btn">
                 Clear Filters
             </a>
 
@@ -1051,13 +1042,10 @@ require __DIR__ . "/includes/header.php";
 
     </div>
 
-
     <div class="result-summary">
 
         <div>
-            <strong>
-                <?= $totalApplicants ?>
-            </strong>
+            <strong><?= $totalApplicants ?></strong>
             applicant(s) found
         </div>
 
@@ -1074,15 +1062,12 @@ require __DIR__ . "/includes/header.php";
                     ) ?>
                 </strong>
                 of
-                <strong>
-                    <?= $totalApplicants ?>
-                </strong>
+                <strong><?= $totalApplicants ?></strong>
             </div>
 
         <?php endif; ?>
 
     </div>
-
 
     <?php if (count($applicants) > 0): ?>
 
@@ -1108,19 +1093,32 @@ require __DIR__ . "/includes/header.php";
                     $applicant["tesda_score"] ?? 0
                 );
 
-                $matchLabel = getMatchLabel(
-                    $matchScore
-                );
-
-                $matchClass = getMatchClass(
-                    $matchScore
-                );
+                $matchLabel = getMatchLabel($matchScore);
+                $matchClass = getMatchClass($matchScore);
 
                 $statusClass =
-                    "status-"
-                    . strtolower(
-                        $applicant["status"]
+                    "status-" . strtolower($applicant["status"]);
+
+                /*
+                |--------------------------------------------------------------------------
+                | APPLICANT SELECTED SKILLS
+                |--------------------------------------------------------------------------
+                */
+
+                $selectedSkills = [];
+
+                if (!empty($applicant["applicant_selected_skills"])) {
+
+                    $selectedSkills = array_filter(
+                        array_map(
+                            "trim",
+                            explode(
+                                ",",
+                                $applicant["applicant_selected_skills"]
+                            )
+                        )
                     );
+                }
 
                 ?>
 
@@ -1141,54 +1139,35 @@ require __DIR__ . "/includes/header.php";
                             </div>
 
                             <div class="job-title">
-
-                                <?= htmlspecialchars(
-                                    $applicant["job_title"]
-                                ) ?>
-
+                                <?= htmlspecialchars($applicant["job_title"]) ?>
                             </div>
 
                             <div class="applied-date">
-
                                 Applied:
-                                <?= date(
-                                    "M d, Y",
-                                    strtotime(
-                                        $applicant["applied_at"]
+                                <?= !empty($applicant["applied_at"])
+                                    ? date(
+                                        "M d, Y",
+                                        strtotime($applicant["applied_at"])
                                     )
-                                ) ?>
-
+                                    : "N/A"
+                                ?>
                             </div>
 
                         </div>
 
-                        <span
-                            class="status <?= htmlspecialchars(
-                                $statusClass
-                            ) ?>"
-                        >
-                            <?= ucfirst(
-                                htmlspecialchars(
-                                    $applicant["status"]
-                                )
-                            ) ?>
+                        <span class="status <?= htmlspecialchars($statusClass) ?>">
+                            <?= ucfirst(htmlspecialchars($applicant["status"])) ?>
                         </span>
 
                     </div>
-
 
                     <div class="info-list">
 
                         <?php if (!empty($applicant["phone"])): ?>
 
                             <div class="info-item">
-
                                 <strong>Phone:</strong>
-
-                                <?= htmlspecialchars(
-                                    $applicant["phone"]
-                                ) ?>
-
+                                <?= htmlspecialchars($applicant["phone"]) ?>
                             </div>
 
                         <?php endif; ?>
@@ -1196,19 +1175,13 @@ require __DIR__ . "/includes/header.php";
                         <?php if (!empty($applicant["address"])): ?>
 
                             <div class="info-item">
-
                                 <strong>Address:</strong>
-
-                                <?= htmlspecialchars(
-                                    $applicant["address"]
-                                ) ?>
-
+                                <?= htmlspecialchars($applicant["address"]) ?>
                             </div>
 
                         <?php endif; ?>
 
                     </div>
-
 
                     <div class="match-box">
 
@@ -1220,25 +1193,14 @@ require __DIR__ . "/includes/header.php";
                                     Explainable Job Match
                                 </span>
 
-                                <span
-                                    class="match-category <?= htmlspecialchars(
-                                        $matchClass
-                                    ) ?>"
-                                >
-                                    <?= htmlspecialchars(
-                                        $matchLabel
-                                    ) ?>
+                                <span class="match-category <?= htmlspecialchars($matchClass) ?>">
+                                    <?= htmlspecialchars($matchLabel) ?>
                                 </span>
 
                             </div>
 
                             <span class="match-score">
-
-                                <?= number_format(
-                                    $matchScore,
-                                    0
-                                ) ?>%
-
+                                <?= number_format($matchScore, 0) ?>%
                             </span>
 
                         </div>
@@ -1252,150 +1214,109 @@ require __DIR__ . "/includes/header.php";
 
                         </div>
 
-
                         <div class="score-grid">
 
                             <div class="score-card">
-
-                                <span>
-                                    Skills
-                                </span>
-
+                                <span>Skills</span>
                                 <strong>
-                                    <?= number_format(
-                                        $skillsScore,
-                                        0
-                                    ) ?>%
+                                    <?= number_format($skillsScore, 0) ?>%
                                 </strong>
-
                             </div>
 
                             <div class="score-card">
-
-                                <span>
-                                    Education
-                                </span>
-
+                                <span>Education</span>
                                 <strong>
-                                    <?= number_format(
-                                        $educationScore,
-                                        0
-                                    ) ?>%
+                                    <?= number_format($educationScore, 0) ?>%
                                 </strong>
-
                             </div>
 
                             <div class="score-card">
-
-                                <span>
-                                    TESDA / NC
-                                </span>
-
+                                <span>TESDA / NC</span>
                                 <strong>
-                                    <?= number_format(
-                                        $tesdaScore,
-                                        0
-                                    ) ?>%
+                                    <?= number_format($tesdaScore, 0) ?>%
                                 </strong>
-
                             </div>
 
                         </div>
 
+                        <!-- APPLICANT-SELECTED SKILLS -->
+
+                        <div class="selected-skills-box">
+
+                            <div class="selected-skills-title">
+                                Skills Selected by Applicant
+                            </div>
+
+                            <?php if (!empty($selectedSkills)): ?>
+
+                                <div class="skill-list">
+
+                                    <?php foreach ($selectedSkills as $skill): ?>
+
+                                        <span class="skill-tag">
+                                            <?= htmlspecialchars($skill) ?>
+                                        </span>
+
+                                    <?php endforeach; ?>
+
+                                </div>
+
+                            <?php else: ?>
+
+                                <div class="no-skills">
+                                    No skills selected by applicant.
+                                </div>
+
+                            <?php endif; ?>
+
+                        </div>
 
                         <?php if (!empty($applicant["matched_skills"])): ?>
 
                             <div class="detail-block">
-
-                                <strong>
-                                    Matched Skills:
-                                </strong>
-
-                                <?= htmlspecialchars(
-                                    $applicant["matched_skills"]
-                                ) ?>
-
+                                <strong>Matched Skills:</strong>
+                                <?= htmlspecialchars($applicant["matched_skills"]) ?>
                             </div>
 
                         <?php endif; ?>
-
 
                         <?php if (!empty($applicant["missing_skills"])): ?>
 
                             <div class="detail-block">
-
-                                <strong>
-                                    Missing Skills:
-                                </strong>
-
-                                <?= htmlspecialchars(
-                                    $applicant["missing_skills"]
-                                ) ?>
-
+                                <strong>Missing Skills:</strong>
+                                <?= htmlspecialchars($applicant["missing_skills"]) ?>
                             </div>
 
                         <?php endif; ?>
 
-
-                        <?php if (!empty(
-                            $applicant["matched_qualifications"]
-                        )): ?>
+                        <?php if (!empty($applicant["matched_qualifications"])): ?>
 
                             <div class="detail-block">
-
-                                <strong>
-                                    Matched Qualifications:
-                                </strong>
-
-                                <?= htmlspecialchars(
-                                    $applicant[
-                                        "matched_qualifications"
-                                    ]
-                                ) ?>
-
+                                <strong>Matched Qualifications:</strong>
+                                <?= htmlspecialchars($applicant["matched_qualifications"]) ?>
                             </div>
 
                         <?php endif; ?>
 
-
-                        <?php if (!empty(
-                            $applicant["missing_qualifications"]
-                        )): ?>
+                        <?php if (!empty($applicant["missing_qualifications"])): ?>
 
                             <div class="detail-block">
-
-                                <strong>
-                                    Missing Qualifications:
-                                </strong>
-
-                                <?= htmlspecialchars(
-                                    $applicant[
-                                        "missing_qualifications"
-                                    ]
-                                ) ?>
-
+                                <strong>Missing Qualifications:</strong>
+                                <?= htmlspecialchars($applicant["missing_qualifications"]) ?>
                             </div>
 
                         <?php endif; ?>
 
-
-                        <?php if (!empty(
-                            $applicant["qualification_explanation"]
-                        )): ?>
+                        <?php if (!empty($applicant["qualification_explanation"])): ?>
 
                             <div class="explanation-box">
 
-                                <strong>
-                                    Why this applicant matched:
-                                </strong>
-
+                                <strong>Why this applicant matched:</strong>
                                 <br>
 
                                 <?= nl2br(
                                     htmlspecialchars(
-                                        $applicant[
-                                            "qualification_explanation"
-                                        ]
+                                        $applicant["qualification_explanation"]
                                     )
                                 ) ?>
 
@@ -1403,24 +1324,16 @@ require __DIR__ . "/includes/header.php";
 
                         <?php endif; ?>
 
-
-                        <?php if (!empty(
-                            $applicant["skill_gap_feedback"]
-                        )): ?>
+                        <?php if (!empty($applicant["skill_gap_feedback"])): ?>
 
                             <div class="gap-box">
 
-                                <strong>
-                                    Skill Gap Feedback:
-                                </strong>
-
+                                <strong>Skill Gap Feedback:</strong>
                                 <br>
 
                                 <?= nl2br(
                                     htmlspecialchars(
-                                        $applicant[
-                                            "skill_gap_feedback"
-                                        ]
+                                        $applicant["skill_gap_feedback"]
                                     )
                                 ) ?>
 
@@ -1430,18 +1343,12 @@ require __DIR__ . "/includes/header.php";
 
                     </div>
 
-
-                    <form
-                        method="POST"
-                        class="status-form"
-                    >
+                    <form method="POST" class="status-form">
 
                         <input
                             type="hidden"
                             name="application_id"
-                            value="<?= (int)
-                                $applicant["application_id"]
-                            ?>"
+                            value="<?= (int) $applicant["application_id"] ?>"
                         >
 
                         <div class="status-form-row">
@@ -1461,29 +1368,20 @@ require __DIR__ . "/includes/header.php";
                                 <?php foreach ($statuses as $status): ?>
 
                                     <option
-                                        value="<?= htmlspecialchars(
-                                            $status
-                                        ) ?>"
+                                        value="<?= htmlspecialchars($status) ?>"
                                         <?= $applicant["status"] === $status
                                             ? "selected"
                                             : ""
                                         ?>
                                     >
-                                        <?= ucfirst(
-                                            htmlspecialchars(
-                                                $status
-                                            )
-                                        ) ?>
+                                        <?= ucfirst(htmlspecialchars($status)) ?>
                                     </option>
 
                                 <?php endforeach; ?>
 
                             </select>
 
-                            <button
-                                type="submit"
-                                class="status-btn"
-                            >
+                            <button type="submit" class="status-btn">
                                 Update
                             </button>
 
@@ -1491,18 +1389,14 @@ require __DIR__ . "/includes/header.php";
 
                     </form>
 
-
                     <div class="card-footer">
 
-                        <?php if (!empty(
-                            $applicant["file_path"]
-                        )): ?>
+                        <?php if (!empty($applicant["file_path"])): ?>
 
                             <a
-                                href="../<?= htmlspecialchars(
-                                    $applicant["file_path"]
-                                ) ?>"
+                                href="../<?= htmlspecialchars($applicant["file_path"]) ?>"
                                 target="_blank"
+                                rel="noopener noreferrer"
                                 class="resume-link"
                             >
                                 View Resume
@@ -1516,11 +1410,8 @@ require __DIR__ . "/includes/header.php";
 
                         <?php endif; ?>
 
-
                         <a
-                            href="view-application.php?id=<?= (int)
-                                $applicant["application_id"]
-                            ?>"
+                            href="view-application.php?id=<?= (int) $applicant["application_id"] ?>"
                             class="view-btn"
                         >
                             View Details
@@ -1534,7 +1425,6 @@ require __DIR__ . "/includes/header.php";
 
         </div>
 
-
         <?php if ($totalPages > 1): ?>
 
             <div class="pagination-wrapper">
@@ -1543,35 +1433,22 @@ require __DIR__ . "/includes/header.php";
 
                     <?php if ($page > 1): ?>
 
-                        <a href="<?= htmlspecialchars(
-                            buildPageUrl(
-                                $page - 1
-                            )
-                        ) ?>">
+                        <a href="<?= htmlspecialchars(buildPageUrl($page - 1)) ?>">
                             Previous
                         </a>
 
                     <?php else: ?>
 
-                        <span class="disabled">
-                            Previous
-                        </span>
+                        <span class="disabled">Previous</span>
 
                     <?php endif; ?>
 
-
                     <?php
-                    $startPage = max(
-                        1,
-                        $page - 2
-                    );
 
-                    $endPage = min(
-                        $totalPages,
-                        $page + 2
-                    );
+                    $startPage = max(1, $page - 2);
+                    $endPage = min($totalPages, $page + 2);
+
                     ?>
-
 
                     <?php for (
                         $pageNumber = $startPage;
@@ -1587,11 +1464,7 @@ require __DIR__ . "/includes/header.php";
 
                         <?php else: ?>
 
-                            <a href="<?= htmlspecialchars(
-                                buildPageUrl(
-                                    $pageNumber
-                                )
-                            ) ?>">
+                            <a href="<?= htmlspecialchars(buildPageUrl($pageNumber)) ?>">
                                 <?= $pageNumber ?>
                             </a>
 
@@ -1599,22 +1472,15 @@ require __DIR__ . "/includes/header.php";
 
                     <?php endfor; ?>
 
-
                     <?php if ($page < $totalPages): ?>
 
-                        <a href="<?= htmlspecialchars(
-                            buildPageUrl(
-                                $page + 1
-                            )
-                        ) ?>">
+                        <a href="<?= htmlspecialchars(buildPageUrl($page + 1)) ?>">
                             Next
                         </a>
 
                     <?php else: ?>
 
-                        <span class="disabled">
-                            Next
-                        </span>
+                        <span class="disabled">Next</span>
 
                     <?php endif; ?>
 
@@ -1624,18 +1490,14 @@ require __DIR__ . "/includes/header.php";
 
         <?php endif; ?>
 
-
     <?php else: ?>
 
         <div class="empty">
 
-            <h2>
-                No Applicants Found
-            </h2>
+            <h2>No Applicants Found</h2>
 
             <p>
-                No applications match your
-                current search or job filter.
+                No applications match your current search or job filter.
             </p>
 
         </div>

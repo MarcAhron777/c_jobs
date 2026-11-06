@@ -1,10 +1,10 @@
+
 <?php
 
 session_start();
 
 require_once "../config/database.php";
 require_once "../services/LocationMatcher.php";
-
 
 /*
 |--------------------------------------------------------------------------
@@ -16,7 +16,6 @@ $search = trim($_GET["search"] ?? "");
 $area = trim($_GET["area"] ?? "");
 $source = trim($_GET["source"] ?? "");
 
-
 /*
 |--------------------------------------------------------------------------
 | CURRENT USER
@@ -25,10 +24,71 @@ $source = trim($_GET["source"] ?? "");
 
 $isApplicant = (
     isset($_SESSION["user_id"]) &&
-    isset($_SESSION["role"]) &&
-    $_SESSION["role"] === "applicant"
+    ($_SESSION["role"] ?? "") === "applicant"
 );
 
+/*
+|--------------------------------------------------------------------------
+| APPLICANT EDUCATIONAL ATTAINMENT
+|--------------------------------------------------------------------------
+*/
+
+$applicantEducationRank = 0;
+
+$educationRanks = [
+    "elementary" => 1,
+    "junior high school" => 2,
+    "senior high school" => 3,
+    "vocational" => 4,
+    "college undergraduate" => 5,
+    "college graduate" => 6,
+    "postgraduate" => 7
+];
+
+if ($isApplicant) {
+
+    $stmt = $pdo->prepare("
+        SELECT id
+        FROM applicants
+        WHERE user_id = ?
+        LIMIT 1
+    ");
+
+    $stmt->execute([
+        $_SESSION["user_id"]
+    ]);
+
+    $applicant = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if ($applicant) {
+
+        $applicantId = (int) $applicant["id"];
+
+        $stmt = $pdo->prepare("
+            SELECT educational_attainment
+            FROM applicant_education
+            WHERE applicant_id = ?
+            ORDER BY id ASC
+            LIMIT 1
+        ");
+
+        $stmt->execute([
+            $applicantId
+        ]);
+
+        $education = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($education) {
+
+            $attainment = strtolower(
+                trim($education["educational_attainment"] ?? "")
+            );
+
+            $applicantEducationRank =
+                $educationRanks[$attainment] ?? 0;
+        }
+    }
+}
 
 /*
 |--------------------------------------------------------------------------
@@ -41,10 +101,9 @@ $applicantLongitude = null;
 $hasApplicantLocation = false;
 
 if ($isApplicant) {
+
     $stmt = $pdo->prepare("
-        SELECT
-            latitude,
-            longitude
+        SELECT latitude, longitude
         FROM applicants
         WHERE user_id = ?
         LIMIT 1
@@ -57,6 +116,7 @@ if ($isApplicant) {
     $applicantLocation = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if ($applicantLocation) {
+
         $applicantLatitude =
             $applicantLocation["latitude"] ?? null;
 
@@ -69,7 +129,6 @@ if ($isApplicant) {
         );
     }
 }
-
 
 /*
 |--------------------------------------------------------------------------
@@ -123,14 +182,81 @@ $sql = "
 
 $params = [];
 
+/*
+|--------------------------------------------------------------------------
+| EDUCATIONAL REQUIREMENT FILTER
+|--------------------------------------------------------------------------
+| Example:
+| Senior High School applicant = Rank 3
+| College Graduate job = Rank 6
+|
+| 6 <= 3 is FALSE, so the job will not appear.
+|--------------------------------------------------------------------------
+*/
+
+if ($isApplicant) {
+
+    $sql .= "
+        AND (
+            CASE
+
+                WHEN LOWER(TRIM(
+                    COALESCE(j.educational_requirement, '')
+                )) IN (
+                    '',
+                    'no formal requirement'
+                )
+                THEN 0
+
+                WHEN LOWER(TRIM(j.educational_requirement))
+                    = 'elementary'
+                THEN 1
+
+                WHEN LOWER(TRIM(j.educational_requirement))
+                    = 'junior high school'
+                THEN 2
+
+                WHEN LOWER(TRIM(j.educational_requirement))
+                    IN (
+                        'senior high school',
+                        'senior high school graduate',
+                        'high school graduate'
+                    )
+                THEN 3
+
+                WHEN LOWER(TRIM(j.educational_requirement))
+                    = 'vocational'
+                THEN 4
+
+                WHEN LOWER(TRIM(j.educational_requirement))
+                    = 'college undergraduate'
+                THEN 5
+
+                WHEN LOWER(TRIM(j.educational_requirement))
+                    = 'college graduate'
+                THEN 6
+
+                WHEN LOWER(TRIM(j.educational_requirement))
+                    = 'postgraduate'
+                THEN 7
+
+                ELSE 999
+
+            END
+        ) <= ?
+    ";
+
+    $params[] = $applicantEducationRank;
+}
 
 /*
 |--------------------------------------------------------------------------
-| SEARCH
+| SEARCH FILTER
 |--------------------------------------------------------------------------
 */
 
 if ($search !== "") {
+
     $sql .= "
         AND (
             j.job_title LIKE ?
@@ -152,20 +278,14 @@ if ($search !== "") {
     $params[] = $searchValue;
 }
 
-
 /*
 |--------------------------------------------------------------------------
 | AREA FILTER
 |--------------------------------------------------------------------------
 */
 
-if (
-    in_array(
-        $area,
-        ["north", "south"],
-        true
-    )
-) {
+if (in_array($area, ["north", "south"], true)) {
+
     $sql .= "
         AND j.caloocan_area = ?
     ";
@@ -173,24 +293,18 @@ if (
     $params[] = $area;
 }
 
-
 /*
 |--------------------------------------------------------------------------
 | SOURCE FILTER
 |--------------------------------------------------------------------------
 */
 
-if (
-    in_array(
-        $source,
-        [
-            "private_employer",
-            "lgu",
-            "job_fair"
-        ],
-        true
-    )
-) {
+if (in_array(
+    $source,
+    ["private_employer", "lgu", "job_fair"],
+    true
+)) {
+
     $sql .= "
         AND j.job_source = ?
     ";
@@ -198,10 +312,9 @@ if (
     $params[] = $source;
 }
 
-
 /*
 |--------------------------------------------------------------------------
-| ORDER
+| ORDER AND EXECUTE
 |--------------------------------------------------------------------------
 */
 
@@ -215,6 +328,7 @@ $stmt->execute($params);
 $jobs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 ?>
+
 
 <!DOCTYPE html>
 <html lang="en">

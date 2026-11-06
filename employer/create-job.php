@@ -1,3 +1,4 @@
+
 <?php
 
 session_start();
@@ -12,8 +13,7 @@ if (
     exit;
 }
 
-$userId =
-    (int) $_SESSION["user_id"];
+$userId = (int) $_SESSION["user_id"];
 
 $error = "";
 
@@ -42,19 +42,15 @@ $stmt = $pdo->prepare("
 
 $stmt->execute([$userId]);
 
-$employer =
-    $stmt->fetch(PDO::FETCH_ASSOC);
+$employer = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$employer) {
     die("Employer profile not found.");
 }
 
-$employerId =
-    (int) $employer["id"];
+$employerId = (int) $employer["id"];
 
-$employerType =
-    $employer["employer_type"]
-    ?? "private";
+$employerType = $employer["employer_type"] ?? "private";
 
 
 /*
@@ -63,13 +59,8 @@ $employerType =
 |--------------------------------------------------------------------------
 */
 
-if (
-    ($employer["verification_status"] ?? "")
-    !== "approved"
-) {
-    header(
-        "Location: jobs.php?verification_required=1"
-    );
+if (($employer["verification_status"] ?? "") !== "approved") {
+    header("Location: jobs.php?verification_required=1");
     exit;
 }
 
@@ -80,31 +71,12 @@ if (
 |--------------------------------------------------------------------------
 */
 
-$jobAddress =
-    trim(
-        $employer["address"]
-        ?? ""
-    );
+$jobAddress = trim($employer["address"] ?? "");
+$jobBarangay = trim($employer["barangay"] ?? "");
+$jobArea = trim($employer["caloocan_area"] ?? "");
 
-$jobBarangay =
-    trim(
-        $employer["barangay"]
-        ?? ""
-    );
-
-$jobArea =
-    trim(
-        $employer["caloocan_area"]
-        ?? ""
-    );
-
-$jobLatitude =
-    $employer["latitude"]
-    ?? null;
-
-$jobLongitude =
-    $employer["longitude"]
-    ?? null;
+$jobLatitude = $employer["latitude"] ?? null;
+$jobLongitude = $employer["longitude"] ?? null;
 
 if (
     $jobAddress === "" ||
@@ -127,10 +99,11 @@ if (
 $jobTitle = "";
 $jobDescription = "";
 $requirements = "";
-$requiredSkills = "";
 
-$employmentType =
-    "Full-time";
+$requiredSkills = "";
+$requiredSkillsList = [];
+
+$employmentType = "Full-time";
 
 $salaryMin = "";
 $salaryMax = "";
@@ -138,22 +111,19 @@ $applicationDeadline = "";
 
 $isRemote = 0;
 
-$postingType =
-    "regular";
+$postingType = "regular";
 
 $sourceName = "";
 $sourceUrl = "";
 $lguJobCategory = "";
 
-$requiresEducation =
-    "no";
+$requiresEducation = "no";
 
 $educationalRequirement = "";
 $requiredDegree = "";
 $degreeClassification = "";
 
-$requiresTesda =
-    "no";
+$requiresTesda = "no";
 
 $tesdaQualification = "";
 $requiredNcLevel = "";
@@ -165,129 +135,77 @@ $requiredNcLevel = "";
 |--------------------------------------------------------------------------
 */
 
-if (
-    $_SERVER["REQUEST_METHOD"]
-    === "POST"
-) {
+if ($_SERVER["REQUEST_METHOD"] === "POST") {
+
     try {
-        $jobTitle =
-            trim(
-                $_POST["job_title"]
-                ?? ""
-            );
 
-        $jobDescription =
-            trim(
-                $_POST["job_description"]
-                ?? ""
-            );
+        $jobTitle = trim($_POST["job_title"] ?? "");
 
-        $requirements =
-            trim(
-                $_POST["requirements"]
-                ?? ""
-            );
+        $jobDescription = trim($_POST["job_description"] ?? "");
 
-        $requiredSkills =
-            trim(
-                $_POST["required_skills"]
-                ?? ""
-            );
+        $requirements = trim($_POST["requirements"] ?? "");
 
-        $employmentType =
-            trim(
-                $_POST["employment_type"]
-                ?? ""
-            );
 
-        $salaryMin =
-            trim(
-                $_POST["salary_min"]
-                ?? ""
-            );
+        /*
+        |--------------------------------------------------------------------------
+        | REQUIRED SKILLS
+        |--------------------------------------------------------------------------
+        */
 
-        $salaryMax =
-            trim(
-                $_POST["salary_max"]
-                ?? ""
-            );
+        $requiredSkillsList = $_POST["required_skills"] ?? [];
 
-        $applicationDeadline =
-            trim(
-                $_POST["application_deadline"]
-                ?? ""
-            );
+        if (!is_array($requiredSkillsList)) {
+            $requiredSkillsList = [];
+        }
 
-        $isRemote =
-            isset($_POST["is_remote"])
-                ? 1
-                : 0;
+        $requiredSkillsList = array_filter(
+            array_map("trim", $requiredSkillsList),
+            function ($skill) {
+                return $skill !== "";
+            }
+        );
 
-        $postingType =
-            trim(
-                $_POST["posting_type"]
-                ?? "regular"
-            );
+        $requiredSkillsList = array_values(
+            array_unique($requiredSkillsList)
+        );
 
-        $sourceName =
-            trim(
-                $_POST["source_name"]
-                ?? ""
-            );
+        $requiredSkills = implode(
+            ", ",
+            $requiredSkillsList
+        );
 
-        $sourceUrl =
-            trim(
-                $_POST["source_url"]
-                ?? ""
-            );
 
-        $lguJobCategory =
-            trim(
-                $_POST["lgu_job_category"]
-                ?? ""
-            );
+        $employmentType = trim($_POST["employment_type"] ?? "");
 
-        $requiresEducation =
-            trim(
-                $_POST["requires_education"]
-                ?? "no"
-            );
+        $salaryMin = trim($_POST["salary_min"] ?? "");
 
-        $educationalRequirement =
-            trim(
-                $_POST["educational_requirement"]
-                ?? ""
-            );
+        $salaryMax = trim($_POST["salary_max"] ?? "");
 
-        $requiredDegree =
-            trim(
-                $_POST["required_degree"]
-                ?? ""
-            );
+        $applicationDeadline = trim($_POST["application_deadline"] ?? "");
 
-        $degreeClassification =
-            trim(
-                $_POST["degree_classification"]
-                ?? ""
-            );
+        $isRemote = isset($_POST["is_remote"]) ? 1 : 0;
 
-        $requiresTesda =
-            trim(
-                $_POST["requires_tesda"]
-                ?? "no"
-            );
+        $postingType = trim($_POST["posting_type"] ?? "regular");
 
-        $tesdaQualification =
-            trim(
-                $_POST["tesda_qualification"]
-                ?? ""
-            );
+        $sourceName = trim($_POST["source_name"] ?? "");
 
-        $requiredNcLevel =
-            trim(
-                $_POST["required_nc_level"]
-                ?? ""
-            );
+        $sourceUrl = trim($_POST["source_url"] ?? "");
+
+        $lguJobCategory = trim($_POST["lgu_job_category"] ?? "");
+
+        $requiresEducation = trim($_POST["requires_education"] ?? "no");
+
+        $educationalRequirement = trim($_POST["educational_requirement"] ?? "");
+
+        $requiredDegree = trim($_POST["required_degree"] ?? "");
+
+        $degreeClassification = trim($_POST["degree_classification"] ?? "");
+
+        $requiresTesda = trim($_POST["requires_tesda"] ?? "no");
+
+        $tesdaQualification = trim($_POST["tesda_qualification"] ?? "");
+
+        $requiredNcLevel = trim($_POST["required_nc_level"] ?? "");
 
 
         /*
@@ -297,20 +215,16 @@ if (
         */
 
         if ($jobTitle === "") {
-            throw new Exception(
-                "Job title is required."
-            );
+            throw new Exception("Job title is required.");
         }
 
         if ($jobDescription === "") {
-            throw new Exception(
-                "Job description is required."
-            );
+            throw new Exception("Job description is required.");
         }
 
-        if ($requiredSkills === "") {
+        if (empty($requiredSkillsList)) {
             throw new Exception(
-                "Required skills are required."
+                "Please add at least one required skill."
             );
         }
 
@@ -323,16 +237,8 @@ if (
             "Freelance"
         ];
 
-        if (
-            !in_array(
-                $employmentType,
-                $allowedEmploymentTypes,
-                true
-            )
-        ) {
-            throw new Exception(
-                "Invalid employment type."
-            );
+        if (!in_array($employmentType, $allowedEmploymentTypes, true)) {
+            throw new Exception("Invalid employment type.");
         }
 
 
@@ -342,19 +248,8 @@ if (
         |--------------------------------------------------------------------------
         */
 
-        if (
-            !in_array(
-                $postingType,
-                [
-                    "regular",
-                    "job_fair"
-                ],
-                true
-            )
-        ) {
-            throw new Exception(
-                "Invalid posting type."
-            );
+        if (!in_array($postingType, ["regular", "job_fair"], true)) {
+            throw new Exception("Invalid posting type.");
         }
 
 
@@ -365,8 +260,8 @@ if (
         */
 
         if ($postingType === "job_fair") {
-            $jobSource =
-                "job_fair";
+
+            $jobSource = "job_fair";
 
             if ($sourceName === "") {
                 throw new Exception(
@@ -375,17 +270,19 @@ if (
             }
 
         } else {
-            if ($employerType === "lgu") {
-                $jobSource =
-                    "lgu";
 
-                $sourceName =
-                    $employer["company_name"];
+            if ($employerType === "lgu") {
+
+                $jobSource = "lgu";
+
+                $sourceName = $employer["company_name"];
+
             } else {
-                $jobSource =
-                    "private_employer";
+
+                $jobSource = "private_employer";
 
                 $sourceName = "";
+
             }
 
             $sourceUrl = "";
@@ -393,14 +290,9 @@ if (
 
         if (
             $sourceUrl !== "" &&
-            !filter_var(
-                $sourceUrl,
-                FILTER_VALIDATE_URL
-            )
+            !filter_var($sourceUrl, FILTER_VALIDATE_URL)
         ) {
-            throw new Exception(
-                "Please enter a valid source URL."
-            );
+            throw new Exception("Please enter a valid source URL.");
         }
 
 
@@ -410,28 +302,24 @@ if (
         |--------------------------------------------------------------------------
         */
 
-        if (
-            !in_array(
-                $requiresEducation,
-                ["yes", "no"],
-                true
-            )
-        ) {
+        if (!in_array($requiresEducation, ["yes", "no"], true)) {
             $requiresEducation = "no";
         }
 
         if ($requiresEducation === "yes") {
-            if (
-                $educationalRequirement === ""
-            ) {
+
+            if ($educationalRequirement === "") {
                 throw new Exception(
                     "Please select an educational requirement."
                 );
             }
+
         } else {
+
             $educationalRequirement = "";
             $requiredDegree = "";
             $degreeClassification = "";
+
         }
 
 
@@ -441,17 +329,12 @@ if (
         |--------------------------------------------------------------------------
         */
 
-        if (
-            !in_array(
-                $requiresTesda,
-                ["yes", "no"],
-                true
-            )
-        ) {
+        if (!in_array($requiresTesda, ["yes", "no"], true)) {
             $requiresTesda = "no";
         }
 
         if ($requiresTesda === "yes") {
+
             if ($tesdaQualification === "") {
                 throw new Exception(
                     "Please enter the TESDA qualification."
@@ -463,9 +346,12 @@ if (
                     "Please select the required NC level."
                 );
             }
+
         } else {
+
             $tesdaQualification = "";
             $requiredNcLevel = "";
+
         }
 
 
@@ -475,29 +361,18 @@ if (
         |--------------------------------------------------------------------------
         */
 
-        if (
-            $salaryMin !== "" &&
-            !is_numeric($salaryMin)
-        ) {
-            throw new Exception(
-                "Invalid minimum salary."
-            );
+        if ($salaryMin !== "" && !is_numeric($salaryMin)) {
+            throw new Exception("Invalid minimum salary.");
         }
 
-        if (
-            $salaryMax !== "" &&
-            !is_numeric($salaryMax)
-        ) {
-            throw new Exception(
-                "Invalid maximum salary."
-            );
+        if ($salaryMax !== "" && !is_numeric($salaryMax)) {
+            throw new Exception("Invalid maximum salary.");
         }
 
         if (
             $salaryMin !== "" &&
             $salaryMax !== "" &&
-            (float) $salaryMin >
-            (float) $salaryMax
+            (float) $salaryMin > (float) $salaryMax
         ) {
             throw new Exception(
                 "Minimum salary cannot be greater than maximum salary."
@@ -512,18 +387,12 @@ if (
         */
 
         if ($applicationDeadline === "") {
-            throw new Exception(
-                "Application deadline is required."
-            );
+            throw new Exception("Application deadline is required.");
         }
 
         if (
-            strtotime(
-                $applicationDeadline
-            ) <
-            strtotime(
-                date("Y-m-d")
-            )
+            strtotime($applicationDeadline) <
+            strtotime(date("Y-m-d"))
         ) {
             throw new Exception(
                 "Application deadline cannot be in the past."
@@ -538,11 +407,11 @@ if (
         */
 
         $location =
-            "Brgy. "
-            . $jobBarangay
-            . ", "
-            . ucfirst($jobArea)
-            . " Caloocan";
+            "Brgy. " .
+            $jobBarangay .
+            ", " .
+            ucfirst($jobArea) .
+            " Caloocan";
 
 
         /*
@@ -595,17 +464,13 @@ if (
             $jobDescription,
             $jobDescription,
 
-            $requirements !== ""
-                ? $requirements
-                : null,
+            $requirements !== "" ? $requirements : null,
 
             $educationalRequirement !== ""
                 ? $educationalRequirement
                 : null,
 
-            $requiredDegree !== ""
-                ? $requiredDegree
-                : null,
+            $requiredDegree !== "" ? $requiredDegree : null,
 
             $requiredSkills,
 
@@ -617,13 +482,9 @@ if (
             $jobLongitude,
             $employmentType,
 
-            $salaryMin !== ""
-                ? (float) $salaryMin
-                : null,
+            $salaryMin !== "" ? (float) $salaryMin : null,
 
-            $salaryMax !== ""
-                ? (float) $salaryMax
-                : null,
+            $salaryMax !== "" ? (float) $salaryMax : null,
 
             $isRemote,
             $applicationDeadline,
@@ -632,37 +493,28 @@ if (
                 ? $tesdaQualification
                 : null,
 
-            $requiredNcLevel !== ""
-                ? $requiredNcLevel
-                : null,
+            $requiredNcLevel !== "" ? $requiredNcLevel : null,
 
             $jobSource,
 
-            $sourceName !== ""
-                ? $sourceName
-                : null,
+            $sourceName !== "" ? $sourceName : null,
 
-            $sourceUrl !== ""
-                ? $sourceUrl
-                : null,
+            $sourceUrl !== "" ? $sourceUrl : null,
 
             $degreeClassification !== ""
                 ? $degreeClassification
                 : null,
 
-            $lguJobCategory !== ""
-                ? $lguJobCategory
-                : null
+            $lguJobCategory !== "" ? $lguJobCategory : null
         ]);
 
-        header(
-            "Location: jobs.php?created=1"
-        );
+        header("Location: jobs.php?created=1");
         exit;
 
     } catch (Throwable $e) {
-        $error =
-            $e->getMessage();
+
+        $error = $e->getMessage();
+
     }
 }
 
@@ -680,9 +532,7 @@ if (
     content="width=device-width, initial-scale=1.0"
 >
 
-<title>
-    Post Job - Employer
-</title>
+<title>Post Job - Employer</title>
 
 <style>
 
@@ -803,6 +653,50 @@ textarea {
     width: auto;
 }
 
+/* REQUIRED SKILLS */
+
+.skill-input-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+    align-items: center;
+}
+
+.skill-input-row input {
+    flex: 1;
+    min-width: 0;
+}
+
+.add-skill-btn {
+    margin-top: 5px;
+    padding: 10px 15px;
+    background: #eff6ff;
+    color: #2563eb;
+    border: 1px solid #bfdbfe;
+    border-radius: 6px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.add-skill-btn:hover {
+    background: #dbeafe;
+}
+
+.remove-skill-btn {
+    padding: 10px 12px;
+    background: #fee2e2;
+    color: #b91c1c;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: bold;
+    white-space: nowrap;
+}
+
+.remove-skill-btn:hover {
+    background: #fecaca;
+}
+
 .actions {
     display: flex;
     gap: 10px;
@@ -828,6 +722,7 @@ textarea {
 }
 
 @media (max-width: 700px) {
+
     .form-grid {
         grid-template-columns: 1fr;
     }
@@ -835,6 +730,27 @@ textarea {
     .full {
         grid-column: auto;
     }
+
+}
+
+@media (max-width: 500px) {
+
+    .skill-input-row {
+        align-items: stretch;
+    }
+
+    .remove-skill-btn {
+        padding: 8px;
+    }
+
+    .actions {
+        flex-direction: column;
+    }
+
+    .actions .btn {
+        text-align: center;
+    }
+
 }
 
 </style>
@@ -850,9 +766,7 @@ textarea {
 
     <div class="page-header">
 
-        <h1>
-            Post a Job
-        </h1>
+        <h1>Post a Job</h1>
 
         <p>
             The job will be submitted for administrator approval.
@@ -875,15 +789,11 @@ textarea {
 
         <div class="card">
 
-            <h2>
-                Employer & Posting Source
-            </h2>
+            <h2>Employer & Posting Source</h2>
 
             <div class="account-box">
 
-                <strong>
-                    Employer Type:
-                </strong>
+                <strong>Employer Type:</strong>
 
                 <?= $employerType === "lgu"
                     ? "Local Government Unit (LGU)"
@@ -913,20 +823,14 @@ textarea {
 
                     <option
                         value="regular"
-                        <?= $postingType === "regular"
-                            ? "selected"
-                            : ""
-                        ?>
+                        <?= $postingType === "regular" ? "selected" : "" ?>
                     >
                         Regular Job Posting
                     </option>
 
                     <option
                         value="job_fair"
-                        <?= $postingType === "job_fair"
-                            ? "selected"
-                            : ""
-                        ?>
+                        <?= $postingType === "job_fair" ? "selected" : "" ?>
                     >
                         Job Fair Posting
                     </option>
@@ -936,10 +840,7 @@ textarea {
             </div>
 
 
-            <div
-                id="sourceFields"
-                class="optional"
-            >
+            <div id="sourceFields" class="optional">
 
                 <div class="form-group">
 
@@ -951,9 +852,7 @@ textarea {
                         type="text"
                         name="source_name"
                         id="source_name"
-                        value="<?= htmlspecialchars(
-                            $sourceName
-                        ) ?>"
+                        value="<?= htmlspecialchars($sourceName) ?>"
                         placeholder="Example: Caloocan Mega Job Fair 2026"
                     >
 
@@ -970,9 +869,7 @@ textarea {
                         type="url"
                         name="source_url"
                         id="source_url"
-                        value="<?= htmlspecialchars(
-                            $sourceUrl
-                        ) ?>"
+                        value="<?= htmlspecialchars($sourceUrl) ?>"
                         placeholder="https://..."
                     >
 
@@ -990,25 +887,19 @@ textarea {
 
         <div class="card">
 
-            <h2>
-                Job Information
-            </h2>
+            <h2>Job Information</h2>
 
             <div class="form-grid">
 
                 <div class="form-group full">
 
-                    <label for="job_title">
-                        Job Title
-                    </label>
+                    <label for="job_title">Job Title</label>
 
                     <input
                         type="text"
                         name="job_title"
                         id="job_title"
-                        value="<?= htmlspecialchars(
-                            $jobTitle
-                        ) ?>"
+                        value="<?= htmlspecialchars($jobTitle) ?>"
                         required
                     >
 
@@ -1025,9 +916,7 @@ textarea {
                         name="job_description"
                         id="job_description"
                         required
-                    ><?= htmlspecialchars(
-                        $jobDescription
-                    ) ?></textarea>
+                    ><?= htmlspecialchars($jobDescription) ?></textarea>
 
                 </div>
 
@@ -1041,30 +930,86 @@ textarea {
                     <textarea
                         name="requirements"
                         id="requirements"
-                    ><?= htmlspecialchars(
-                        $requirements
-                    ) ?></textarea>
+                    ><?= htmlspecialchars($requirements) ?></textarea>
 
                 </div>
 
 
+                <!-- EMPLOYER-CREATED REQUIRED SKILLS -->
+
                 <div class="form-group full">
 
-                    <label for="required_skills">
+                    <label>
                         Required Skills
                     </label>
 
-                    <textarea
-                        name="required_skills"
-                        id="required_skills"
-                        placeholder="Example: Microsoft Excel, Data Encoding, Customer Service"
-                        required
-                    ><?= htmlspecialchars(
-                        $requiredSkills
-                    ) ?></textarea>
+                    <div id="skillsContainer">
+
+                        <?php if (!empty($requiredSkillsList)): ?>
+
+                            <?php foreach ($requiredSkillsList as $skill): ?>
+
+                                <div class="skill-input-row">
+
+                                    <input
+                                        type="text"
+                                        name="required_skills[]"
+                                        value="<?= htmlspecialchars($skill) ?>"
+                                        placeholder="Enter required skill"
+                                        maxlength="255"
+                                        required
+                                    >
+
+                                    <button
+                                        type="button"
+                                        class="remove-skill-btn"
+                                        onclick="removeSkill(this)"
+                                    >
+                                        Remove
+                                    </button>
+
+                                </div>
+
+                            <?php endforeach; ?>
+
+                        <?php else: ?>
+
+                            <div class="skill-input-row">
+
+                                <input
+                                    type="text"
+                                    name="required_skills[]"
+                                    placeholder="Example: Customer Service"
+                                    maxlength="255"
+                                    required
+                                >
+
+                                <button
+                                    type="button"
+                                    class="remove-skill-btn"
+                                    onclick="removeSkill(this)"
+                                >
+                                    Remove
+                                </button>
+
+                            </div>
+
+                        <?php endif; ?>
+
+                    </div>
+
+                    <button
+                        type="button"
+                        id="addSkillBtn"
+                        class="add-skill-btn"
+                    >
+                        + Add Another Skill
+                    </button>
 
                     <small class="help">
-                        Separate skills using commas.
+                        Add each required skill separately.
+                        Applicants will see these skills as checkboxes
+                        when they apply for this job.
                     </small>
 
                 </div>
@@ -1088,17 +1033,12 @@ textarea {
                                 "Contract",
                                 "Internship",
                                 "Freelance"
-                            ]
-                            as
-                            $type
+                            ] as $type
                         ): ?>
 
                             <option
                                 value="<?= $type ?>"
-                                <?= $employmentType === $type
-                                    ? "selected"
-                                    : ""
-                                ?>
+                                <?= $employmentType === $type ? "selected" : "" ?>
                             >
                                 <?= $type ?>
                             </option>
@@ -1120,9 +1060,7 @@ textarea {
                         type="date"
                         name="application_deadline"
                         id="application_deadline"
-                        value="<?= htmlspecialchars(
-                            $applicationDeadline
-                        ) ?>"
+                        value="<?= htmlspecialchars($applicationDeadline) ?>"
                         required
                     >
 
@@ -1141,9 +1079,7 @@ textarea {
                         id="salary_min"
                         step="0.01"
                         min="0"
-                        value="<?= htmlspecialchars(
-                            $salaryMin
-                        ) ?>"
+                        value="<?= htmlspecialchars($salaryMin) ?>"
                     >
 
                 </div>
@@ -1161,9 +1097,7 @@ textarea {
                         id="salary_max"
                         step="0.01"
                         min="0"
-                        value="<?= htmlspecialchars(
-                            $salaryMax
-                        ) ?>"
+                        value="<?= htmlspecialchars($salaryMax) ?>"
                     >
 
                 </div>
@@ -1177,10 +1111,7 @@ textarea {
                             type="checkbox"
                             name="is_remote"
                             value="1"
-                            <?= $isRemote
-                                ? "checked"
-                                : ""
-                            ?>
+                            <?= $isRemote ? "checked" : "" ?>
                         >
 
                         Remote work available
@@ -1200,9 +1131,7 @@ textarea {
                         type="text"
                         name="lgu_job_category"
                         id="lgu_job_category"
-                        value="<?= htmlspecialchars(
-                            $lguJobCategory
-                        ) ?>"
+                        value="<?= htmlspecialchars($lguJobCategory) ?>"
                         placeholder="Example: Administrative, IT, Healthcare, Skilled Work"
                     >
 
@@ -1215,9 +1144,7 @@ textarea {
 
         <div class="card">
 
-            <h2>
-                Education Requirement
-            </h2>
+            <h2>Education Requirement</h2>
 
             <div class="form-group">
 
@@ -1233,20 +1160,14 @@ textarea {
 
                     <option
                         value="no"
-                        <?= $requiresEducation === "no"
-                            ? "selected"
-                            : ""
-                        ?>
+                        <?= $requiresEducation === "no" ? "selected" : "" ?>
                     >
                         No
                     </option>
 
                     <option
                         value="yes"
-                        <?= $requiresEducation === "yes"
-                            ? "selected"
-                            : ""
-                        ?>
+                        <?= $requiresEducation === "yes" ? "selected" : "" ?>
                     >
                         Yes
                     </option>
@@ -1256,10 +1177,7 @@ textarea {
             </div>
 
 
-            <div
-                id="educationFields"
-                class="optional"
-            >
+            <div id="educationFields" class="optional">
 
                 <div class="form-grid">
 
@@ -1274,9 +1192,7 @@ textarea {
                             id="educational_requirement"
                         >
 
-                            <option value="">
-                                Select
-                            </option>
+                            <option value="">Select</option>
 
                             <?php foreach (
                                 [
@@ -1287,17 +1203,12 @@ textarea {
                                     "College Undergraduate",
                                     "College Graduate",
                                     "Postgraduate"
-                                ]
-                                as
-                                $education
+                                ] as $education
                             ): ?>
 
                                 <option
                                     value="<?= $education ?>"
-                                    <?= $educationalRequirement === $education
-                                        ? "selected"
-                                        : ""
-                                    ?>
+                                    <?= $educationalRequirement === $education ? "selected" : "" ?>
                                 >
                                     <?= $education ?>
                                 </option>
@@ -1319,9 +1230,7 @@ textarea {
                             type="text"
                             name="required_degree"
                             id="required_degree"
-                            value="<?= htmlspecialchars(
-                                $requiredDegree
-                            ) ?>"
+                            value="<?= htmlspecialchars($requiredDegree) ?>"
                             placeholder="Example: BS Information Technology"
                         >
 
@@ -1338,9 +1247,7 @@ textarea {
                             type="text"
                             name="degree_classification"
                             id="degree_classification"
-                            value="<?= htmlspecialchars(
-                                $degreeClassification
-                            ) ?>"
+                            value="<?= htmlspecialchars($degreeClassification) ?>"
                             placeholder="Example: Information Technology"
                         >
 
@@ -1355,9 +1262,7 @@ textarea {
 
         <div class="card">
 
-            <h2>
-                TESDA / NC Requirement
-            </h2>
+            <h2>TESDA / NC Requirement</h2>
 
             <div class="form-group">
 
@@ -1373,20 +1278,14 @@ textarea {
 
                     <option
                         value="no"
-                        <?= $requiresTesda === "no"
-                            ? "selected"
-                            : ""
-                        ?>
+                        <?= $requiresTesda === "no" ? "selected" : "" ?>
                     >
                         No
                     </option>
 
                     <option
                         value="yes"
-                        <?= $requiresTesda === "yes"
-                            ? "selected"
-                            : ""
-                        ?>
+                        <?= $requiresTesda === "yes" ? "selected" : "" ?>
                     >
                         Yes
                     </option>
@@ -1396,10 +1295,7 @@ textarea {
             </div>
 
 
-            <div
-                id="tesdaFields"
-                class="optional"
-            >
+            <div id="tesdaFields" class="optional">
 
                 <div class="form-grid">
 
@@ -1413,9 +1309,7 @@ textarea {
                             type="text"
                             name="tesda_qualification"
                             id="tesda_qualification"
-                            value="<?= htmlspecialchars(
-                                $tesdaQualification
-                            ) ?>"
+                            value="<?= htmlspecialchars($tesdaQualification) ?>"
                             placeholder="Example: Computer Systems Servicing"
                         >
 
@@ -1433,9 +1327,7 @@ textarea {
                             id="required_nc_level"
                         >
 
-                            <option value="">
-                                Select
-                            </option>
+                            <option value="">Select</option>
 
                             <?php foreach (
                                 [
@@ -1443,17 +1335,12 @@ textarea {
                                     "NC II",
                                     "NC III",
                                     "NC IV"
-                                ]
-                                as
-                                $level
+                                ] as $level
                             ): ?>
 
                                 <option
                                     value="<?= $level ?>"
-                                    <?= $requiredNcLevel === $level
-                                        ? "selected"
-                                        : ""
-                                    ?>
+                                    <?= $requiredNcLevel === $level ? "selected" : "" ?>
                                 >
                                     <?= $level ?>
                                 </option>
@@ -1473,31 +1360,21 @@ textarea {
 
         <div class="card">
 
-            <h2>
-                Work Location
-            </h2>
+            <h2>Work Location</h2>
 
             <p>
                 <strong>Address:</strong>
-                <?= htmlspecialchars(
-                    $jobAddress
-                ) ?>
+                <?= htmlspecialchars($jobAddress) ?>
             </p>
 
             <p>
                 <strong>Barangay:</strong>
-                <?= htmlspecialchars(
-                    $jobBarangay
-                ) ?>
+                <?= htmlspecialchars($jobBarangay) ?>
             </p>
 
             <p>
                 <strong>Area:</strong>
-                <?= ucfirst(
-                    htmlspecialchars(
-                        $jobArea
-                    )
-                ) ?>
+                <?= ucfirst(htmlspecialchars($jobArea)) ?>
                 Caloocan
             </p>
 
@@ -1534,99 +1411,172 @@ textarea {
 
 <script>
 
+/*
+|--------------------------------------------------------------------------
+| REQUIRED SKILLS
+|--------------------------------------------------------------------------
+*/
+
+function addSkill() {
+
+    const container = document.getElementById("skillsContainer");
+
+    const row = document.createElement("div");
+
+    row.className = "skill-input-row";
+
+    const input = document.createElement("input");
+
+    input.type = "text";
+    input.name = "required_skills[]";
+    input.placeholder = "Enter required skill";
+    input.maxLength = 255;
+    input.required = true;
+
+    const button = document.createElement("button");
+
+    button.type = "button";
+    button.className = "remove-skill-btn";
+    button.textContent = "Remove";
+    button.onclick = function () {
+        removeSkill(this);
+    };
+
+    row.appendChild(input);
+    row.appendChild(button);
+
+    container.appendChild(row);
+
+    input.focus();
+}
+
+
+function removeSkill(button) {
+
+    const container = document.getElementById("skillsContainer");
+
+    const rows = container.querySelectorAll(".skill-input-row");
+
+    if (rows.length <= 1) {
+
+        alert("At least one skill field is required.");
+
+        return;
+    }
+
+    button.closest(".skill-input-row").remove();
+}
+
+
+document.getElementById("addSkillBtn").addEventListener(
+    "click",
+    addSkill
+);
+
+
+/*
+|--------------------------------------------------------------------------
+| POSTING SOURCE
+|--------------------------------------------------------------------------
+*/
+
 function toggleSourceFields() {
-    const type =
-        document.getElementById(
-            "posting_type"
-        ).value;
 
-    const fields =
-        document.getElementById(
-            "sourceFields"
-        );
+    const type = document.getElementById("posting_type").value;
 
-    const sourceName =
-        document.getElementById(
-            "source_name"
-        );
+    const fields = document.getElementById("sourceFields");
+
+    const sourceName = document.getElementById("source_name");
 
     if (type === "job_fair") {
+
         fields.style.display = "block";
         sourceName.required = true;
+
     } else {
+
         fields.style.display = "none";
         sourceName.required = false;
+
     }
 }
 
+
+/*
+|--------------------------------------------------------------------------
+| EDUCATION
+|--------------------------------------------------------------------------
+*/
 
 function toggleEducation() {
-    const value =
-        document.getElementById(
-            "requires_education"
-        ).value;
 
-    const fields =
-        document.getElementById(
-            "educationFields"
-        );
+    const value = document.getElementById("requires_education").value;
 
-    const attainment =
-        document.getElementById(
-            "educational_requirement"
-        );
+    const fields = document.getElementById("educationFields");
+
+    const attainment = document.getElementById("educational_requirement");
 
     if (value === "yes") {
+
         fields.style.display = "block";
         attainment.required = true;
+
     } else {
+
         fields.style.display = "none";
         attainment.required = false;
+
     }
 }
 
 
+/*
+|--------------------------------------------------------------------------
+| TESDA
+|--------------------------------------------------------------------------
+*/
+
 function toggleTesda() {
-    const value =
-        document.getElementById(
-            "requires_tesda"
-        ).value;
 
-    const fields =
-        document.getElementById(
-            "tesdaFields"
-        );
+    const value = document.getElementById("requires_tesda").value;
 
-    const qualification =
-        document.getElementById(
-            "tesda_qualification"
-        );
+    const fields = document.getElementById("tesdaFields");
 
-    const nc =
-        document.getElementById(
-            "required_nc_level"
-        );
+    const qualification = document.getElementById("tesda_qualification");
+
+    const nc = document.getElementById("required_nc_level");
 
     if (value === "yes") {
+
         fields.style.display = "block";
         qualification.required = true;
         nc.required = true;
+
     } else {
+
         fields.style.display = "none";
         qualification.required = false;
         nc.required = false;
+
     }
 }
 
 
-document.addEventListener(
-    "DOMContentLoaded",
-    function () {
-        toggleSourceFields();
-        toggleEducation();
-        toggleTesda();
-    }
-);
+/*
+|--------------------------------------------------------------------------
+| INITIALIZE
+|--------------------------------------------------------------------------
+*/
+
+document.addEventListener("DOMContentLoaded", function () {
+
+    toggleSourceFields();
+
+    toggleEducation();
+
+    toggleTesda();
+
+});
 
 </script>
 

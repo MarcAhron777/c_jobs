@@ -177,4 +177,17 @@ class QualificationMatcher
             default => 0,
         };
     }
+
+    public static function isEligible(array $job, ?array $education, array $tesdaRows): array
+    {
+        $result = self::calculate($job, $education, $tesdaRows);
+
+        $eligible = $result['education_score'] >= 100 && $result['tesda_score'] >= 100;
+
+        return [
+            'eligible' => $eligible,
+            'reasons' => $result['missing_qualifications'],
+            'explanation' => $result['explanation']
+        ];
+    }
 }
